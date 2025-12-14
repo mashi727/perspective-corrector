@@ -1710,7 +1710,21 @@ class PerspectiveCorrectorApp(QMainWindow):
         msg.setWindowTitle(title)
         msg.setText(text)
         msg.setStandardButtons(buttons)
-        self.center_dialog(msg)
+
+        # サイズを確定させてから中央配置
+        msg.layout().setSizeConstraint(msg.layout().SetFixedSize)
+        msg.adjustSize()
+
+        # メインウィンドウの中心を計算
+        main_geo = self.geometry()
+        main_center_x = main_geo.x() + main_geo.width() // 2
+        main_center_y = main_geo.y() + main_geo.height() // 2
+
+        # ダイアログの左上座標を計算
+        dialog_x = main_center_x - msg.sizeHint().width() // 2
+        dialog_y = main_center_y - msg.sizeHint().height() // 2
+        msg.move(dialog_x, dialog_y)
+
         return msg.exec()
 
     def open_folder(self):
