@@ -1471,7 +1471,8 @@ class PerspectiveCorrectorApp(QMainWindow):
                 image_path = self.canvas.temp_file
 
         dialog = DetectionSettingsDialog(self, self.detection_settings, image_path)
-        self.center_dialog(dialog)
+        dialog.resize(800, 600)  # 明示的にサイズ設定
+        self.center_dialog(dialog, 800, 600)
         if dialog.exec() == QDialog.Accepted:
             self.detection_settings = dialog.get_settings()
             self.save_config()
@@ -1556,7 +1557,8 @@ class PerspectiveCorrectorApp(QMainWindow):
         progress = QProgressDialog("処理中...", "キャンセル", 0, len(files_to_process), self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
-        self.center_dialog(progress)
+        progress.setFixedSize(400, 100)
+        self.center_dialog(progress, 400, 100)
 
         success_count = 0
         error_files = []
@@ -1678,12 +1680,27 @@ class PerspectiveCorrectorApp(QMainWindow):
         self.save_recent_folders()
         self.update_recent_folders_menu()
 
-    def center_dialog(self, dialog):
+    def center_dialog(self, dialog, width=None, height=None):
         """ダイアログをアプリウィンドウの中心に配置"""
-        dialog.adjustSize()
+        # サイズが指定されていればリサイズ
+        if width and height:
+            dialog.resize(width, height)
+        else:
+            dialog.adjustSize()
+            # minimumSizeが設定されている場合はそれを使用
+            min_size = dialog.minimumSize()
+            if min_size.width() > 0 and min_size.height() > 0:
+                dialog.resize(min_size)
+
+        # メインウィンドウの中心を計算
         main_geo = self.geometry()
-        dialog_x = main_geo.x() + (main_geo.width() - dialog.width()) // 2
-        dialog_y = main_geo.y() + (main_geo.height() - dialog.height()) // 2
+        main_center_x = main_geo.x() + main_geo.width() // 2
+        main_center_y = main_geo.y() + main_geo.height() // 2
+
+        # ダイアログの左上座標を計算（中心から半分ずらす）
+        dialog_x = main_center_x - dialog.width() // 2
+        dialog_y = main_center_y - dialog.height() // 2
+
         dialog.move(dialog_x, dialog_y)
 
     def show_message_box(self, icon, title, text, buttons=QMessageBox.Ok):
@@ -1703,8 +1720,7 @@ class PerspectiveCorrectorApp(QMainWindow):
         dialog.setOption(QFileDialog.ShowDirsOnly, True)
         dialog.setOption(QFileDialog.DontUseNativeDialog, True)
 
-        dialog.resize(700, 500)
-        self.center_dialog(dialog)
+        self.center_dialog(dialog, 700, 500)
 
         if dialog.exec() == QFileDialog.Accepted:
             folders = dialog.selectedFiles()
