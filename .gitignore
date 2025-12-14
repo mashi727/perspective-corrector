@@ -35,3 +35,6 @@ corrected/
 *.JPG
 *.JPEG
 *.PNG
+
+# Claude Code local config
+CLAUDE.md
