@@ -1721,8 +1721,16 @@ class PerspectiveCorrectorApp(QMainWindow):
 def main():
     app = QApplication(sys.argv)
 
-    # コマンドライン引数でディレクトリ指定可能
-    start_dir = sys.argv[1] if len(sys.argv) > 1 else None
+    # コマンドライン引数でディレクトリ指定可能（フォルダをexeにドロップした場合も対応）
+    start_dir = None
+    if len(sys.argv) > 1:
+        arg_path = Path(sys.argv[1])
+        if arg_path.is_dir():
+            # フォルダが指定された場合
+            start_dir = str(arg_path)
+        elif arg_path.is_file():
+            # ファイルが指定された場合は親フォルダを使用
+            start_dir = str(arg_path.parent)
 
     window = PerspectiveCorrectorApp(start_dir)
     window.show()
