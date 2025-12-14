@@ -1471,6 +1471,7 @@ class PerspectiveCorrectorApp(QMainWindow):
                 image_path = self.canvas.temp_file
 
         dialog = DetectionSettingsDialog(self, self.detection_settings, image_path)
+        self.center_dialog(dialog)
         if dialog.exec() == QDialog.Accepted:
             self.detection_settings = dialog.get_settings()
             self.save_config()
@@ -1535,14 +1536,14 @@ class PerspectiveCorrectorApp(QMainWindow):
         ]
 
         if not files_to_process:
-            QMessageBox.warning(self, "警告", "処理するファイルがありません")
+            self.show_message_box(QMessageBox.Warning, "警告", "処理するファイルがありません")
             return
 
         # 現在の座標を保存
         self.save_current_corners()
 
-        reply = QMessageBox.question(
-            self, "確認",
+        reply = self.show_message_box(
+            QMessageBox.Question, "確認",
             f"{len(files_to_process)} ファイルの台形補正を実行しますか？\n"
             "出力ファイルは「[出力名]_corrected.png」として保存されます。",
             QMessageBox.Yes | QMessageBox.No
@@ -1555,6 +1556,7 @@ class PerspectiveCorrectorApp(QMainWindow):
         progress = QProgressDialog("処理中...", "キャンセル", 0, len(files_to_process), self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
+        self.center_dialog(progress)
 
         success_count = 0
         error_files = []
@@ -1621,7 +1623,7 @@ class PerspectiveCorrectorApp(QMainWindow):
                 msg += f"  {path}: {err}\n"
             if len(error_files) > 5:
                 msg += f"  ... 他 {len(error_files) - 5} ファイル"
-            QMessageBox.warning(self, "エラー", msg)
+            self.show_message_box(QMessageBox.Warning, "エラー", msg)
 
     def setup_menu_bar(self):
         """メニューバーをセットアップ"""
@@ -1676,19 +1678,33 @@ class PerspectiveCorrectorApp(QMainWindow):
         self.save_recent_folders()
         self.update_recent_folders_menu()
 
+    def center_dialog(self, dialog):
+        """ダイアログをアプリウィンドウの中心に配置"""
+        dialog.adjustSize()
+        main_geo = self.geometry()
+        dialog_x = main_geo.x() + (main_geo.width() - dialog.width()) // 2
+        dialog_y = main_geo.y() + (main_geo.height() - dialog.height()) // 2
+        dialog.move(dialog_x, dialog_y)
+
+    def show_message_box(self, icon, title, text, buttons=QMessageBox.Ok):
+        """中央配置されたメッセージボックスを表示"""
+        msg = QMessageBox(self)
+        msg.setIcon(icon)
+        msg.setWindowTitle(title)
+        msg.setText(text)
+        msg.setStandardButtons(buttons)
+        self.center_dialog(msg)
+        return msg.exec()
+
     def open_folder(self):
         """フォルダを開くダイアログ"""
         dialog = QFileDialog(self, "フォルダを開く", self.start_dir)
         dialog.setFileMode(QFileDialog.Directory)
         dialog.setOption(QFileDialog.ShowDirsOnly, True)
-        dialog.setOption(QFileDialog.DontUseNativeDialog, True)  # 非ネイティブダイアログを使用
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
 
-        # ダイアログをアプリウィンドウの中心に配置
         dialog.resize(700, 500)
-        main_center = self.geometry().center()
-        dialog_x = main_center.x() - dialog.width() // 2
-        dialog_y = main_center.y() - dialog.height() // 2
-        dialog.move(dialog_x, dialog_y)
+        self.center_dialog(dialog)
 
         if dialog.exec() == QFileDialog.Accepted:
             folders = dialog.selectedFiles()
@@ -1698,7 +1714,7 @@ class PerspectiveCorrectorApp(QMainWindow):
     def change_folder(self, folder_path: str):
         """作業フォルダを変更"""
         if not Path(folder_path).is_dir():
-            QMessageBox.warning(self, "エラー", f"フォルダが見つかりません:\n{folder_path}")
+            self.show_message_box(QMessageBox.Warning, "エラー", f"フォルダが見つかりません:\n{folder_path}")
             return
 
         # 現在の座標を保存
