@@ -1705,24 +1705,64 @@ class PerspectiveCorrectorApp(QMainWindow):
 
     def show_message_box(self, icon, title, text, buttons=QMessageBox.Ok):
         """中央配置されたメッセージボックスを表示"""
-        msg = QMessageBox(self)
-        msg.setIcon(icon)
-        msg.setWindowTitle(title)
-        msg.setText(text)
-        msg.setStandardButtons(buttons)
+        # カスタムダイアログで確実に中央配置
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        layout = QVBoxLayout(dialog)
 
-        # メインウィンドウの中心を計算
-        main_geo = self.geometry()
-        main_center_x = main_geo.x() + main_geo.width() // 2
-        main_center_y = main_geo.y() + main_geo.height() // 2
+        # アイコンとテキストを横に並べる
+        content_layout = QHBoxLayout()
 
-        # sizeHintでサイズを取得して中央配置
-        size = msg.sizeHint()
-        dialog_x = main_center_x - size.width() // 2
-        dialog_y = main_center_y - size.height() // 2
-        msg.move(dialog_x, dialog_y)
+        # アイコン
+        icon_label = QLabel()
+        style = dialog.style()
+        if icon == QMessageBox.Warning:
+            pixmap = style.standardIcon(style.StandardPixmap.SP_MessageBoxWarning).pixmap(48, 48)
+        elif icon == QMessageBox.Question:
+            pixmap = style.standardIcon(style.StandardPixmap.SP_MessageBoxQuestion).pixmap(48, 48)
+        elif icon == QMessageBox.Information:
+            pixmap = style.standardIcon(style.StandardPixmap.SP_MessageBoxInformation).pixmap(48, 48)
+        elif icon == QMessageBox.Critical:
+            pixmap = style.standardIcon(style.StandardPixmap.SP_MessageBoxCritical).pixmap(48, 48)
+        else:
+            pixmap = None
+        if pixmap:
+            icon_label.setPixmap(pixmap)
+            content_layout.addWidget(icon_label)
 
-        return msg.exec()
+        # テキスト
+        text_label = QLabel(text)
+        text_label.setWordWrap(True)
+        content_layout.addWidget(text_label, 1)
+        layout.addLayout(content_layout)
+
+        # ボタン
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        result = [None]
+
+        if buttons & QMessageBox.Yes:
+            yes_btn = QPushButton("はい")
+            yes_btn.clicked.connect(lambda: (result.__setitem__(0, QMessageBox.Yes), dialog.accept()))
+            button_layout.addWidget(yes_btn)
+        if buttons & QMessageBox.No:
+            no_btn = QPushButton("いいえ")
+            no_btn.clicked.connect(lambda: (result.__setitem__(0, QMessageBox.No), dialog.reject()))
+            button_layout.addWidget(no_btn)
+        if buttons & QMessageBox.Ok:
+            ok_btn = QPushButton("OK")
+            ok_btn.clicked.connect(lambda: (result.__setitem__(0, QMessageBox.Ok), dialog.accept()))
+            button_layout.addWidget(ok_btn)
+
+        layout.addLayout(button_layout)
+
+        # サイズ調整と中央配置
+        dialog.adjustSize()
+        dialog.setMinimumWidth(350)
+        self.center_dialog(dialog, dialog.width(), dialog.height())
+
+        dialog.exec()
+        return result[0] if result[0] else QMessageBox.No
 
     def open_folder(self):
         """フォルダを開くダイアログ"""
