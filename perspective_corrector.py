@@ -446,6 +446,17 @@ class DetectionSettingsDialog(QDialog):
         super().resizeEvent(event)
         self.update_preview()
 
+    def showEvent(self, event):
+        """表示時に親ウィンドウの中央に配置"""
+        super().showEvent(event)
+        if self.parent():
+            main_geo = self.parent().geometry()
+            main_center_x = main_geo.x() + main_geo.width() // 2
+            main_center_y = main_geo.y() + main_geo.height() // 2
+            dialog_x = main_center_x - self.width() // 2
+            dialog_y = main_center_y - self.height() // 2
+            self.move(dialog_x, dialog_y)
+
     def get_settings(self):
         """現在の設定を辞書で返す"""
         return {
