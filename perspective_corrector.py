@@ -22,10 +22,10 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QGroupBox, QTableWidget, QTableWidgetItem,
     QMessageBox, QProgressDialog, QSplitter, QStatusBar, QHeaderView,
     QAbstractItemView, QDialog, QFormLayout, QSpinBox, QDoubleSpinBox,
-    QDialogButtonBox, QSlider
+    QDialogButtonBox, QSlider, QFileDialog, QMenuBar, QMenu
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QMouseEvent, QBrush
+from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QMouseEvent, QBrush, QAction, QKeySequence
 
 
 def convert_heic_to_temp_jpeg(heic_path: str) -> str:
@@ -972,24 +972,37 @@ class ImageCanvas(QLabel):
         self.update_display()
         self.coordinates_changed.emit()
 
+    def clear_image(self):
+        """画像をクリア"""
+        self.original_pixmap = None
+        self.base_pixmap = None
+        self.corners = []
+        self.mouse_pos = None
+        self.clear()
+        self.setText("画像を選択してください")
+
 
 class PerspectiveCorrectorApp(QMainWindow):
     """メインアプリケーション"""
 
     CONFIG_FILE = "perspective_config.json"
 
+    RECENT_FOLDERS_FILE = ".perspective_corrector_recent.json"  # ホームに保存
+
     def __init__(self, start_dir: str = None):
         super().__init__()
-        self.setWindowTitle("プレゼン写真 台形補正ツール")
         self.setMinimumSize(1500, 800)
 
         self.start_dir = start_dir or str(Path.cwd())
         self.current_image = None
         self.config = {}
         self.detection_settings = {}  # 自動認識パラメータ
+        self.recent_folders = []  # 最近使用したフォルダ
 
+        self.load_recent_folders()
         self.load_config()
         self.setup_ui()
+        self.update_window_title()
 
     def load_config(self):
         """設定ファイルを読み込み"""
@@ -1019,8 +1032,47 @@ class PerspectiveCorrectorApp(QMainWindow):
         except Exception as e:
             print(f"Config save error: {e}")
 
+    def load_recent_folders(self):
+        """最近使用したフォルダを読み込み"""
+        recent_path = Path.home() / self.RECENT_FOLDERS_FILE
+        if recent_path.exists():
+            try:
+                with open(recent_path, 'r', encoding='utf-8') as f:
+                    self.recent_folders = json.load(f)
+            except Exception:
+                self.recent_folders = []
+
+    def save_recent_folders(self):
+        """最近使用したフォルダを保存"""
+        recent_path = Path.home() / self.RECENT_FOLDERS_FILE
+        try:
+            with open(recent_path, 'w', encoding='utf-8') as f:
+                json.dump(self.recent_folders, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def add_recent_folder(self, folder_path: str):
+        """最近使用したフォルダに追加"""
+        # 既存のエントリを削除
+        if folder_path in self.recent_folders:
+            self.recent_folders.remove(folder_path)
+        # 先頭に追加
+        self.recent_folders.insert(0, folder_path)
+        # 最大10件に制限
+        self.recent_folders = self.recent_folders[:10]
+        self.save_recent_folders()
+        self.update_recent_folders_menu()
+
+    def update_window_title(self):
+        """ウィンドウタイトルを更新"""
+        folder_name = Path(self.start_dir).name
+        self.setWindowTitle(f"台形補正ツール - {folder_name}")
+
     def setup_ui(self):
         """UIをセットアップ"""
+        # メニューバー
+        self.setup_menu_bar()
+
         central = QWidget()
         self.setCentralWidget(central)
 
@@ -1565,9 +1617,104 @@ class PerspectiveCorrectorApp(QMainWindow):
                 msg += f"  ... 他 {len(error_files) - 5} ファイル"
             QMessageBox.warning(self, "エラー", msg)
 
+    def setup_menu_bar(self):
+        """メニューバーをセットアップ"""
+        menubar = self.menuBar()
+
+        # ファイルメニュー
+        file_menu = menubar.addMenu("ファイル(&F)")
+
+        # フォルダを開く
+        open_action = QAction("フォルダを開く...(&O)", self)
+        open_action.setShortcut(QKeySequence.Open)
+        open_action.triggered.connect(self.open_folder)
+        file_menu.addAction(open_action)
+
+        # 最近使用したフォルダ
+        self.recent_menu = file_menu.addMenu("最近使用したフォルダ(&R)")
+        self.update_recent_folders_menu()
+
+        file_menu.addSeparator()
+
+        # 終了
+        quit_action = QAction("終了(&Q)", self)
+        quit_action.setShortcut(QKeySequence.Quit)
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+    def update_recent_folders_menu(self):
+        """最近使用したフォルダメニューを更新"""
+        self.recent_menu.clear()
+
+        if not self.recent_folders:
+            no_recent = QAction("(なし)", self)
+            no_recent.setEnabled(False)
+            self.recent_menu.addAction(no_recent)
+            return
+
+        for folder in self.recent_folders:
+            folder_name = Path(folder).name
+            action = QAction(f"{folder_name}  ({folder})", self)
+            action.setData(folder)
+            action.triggered.connect(lambda checked, f=folder: self.change_folder(f))
+            self.recent_menu.addAction(action)
+
+        self.recent_menu.addSeparator()
+        clear_action = QAction("履歴をクリア", self)
+        clear_action.triggered.connect(self.clear_recent_folders)
+        self.recent_menu.addAction(clear_action)
+
+    def clear_recent_folders(self):
+        """最近使用したフォルダをクリア"""
+        self.recent_folders = []
+        self.save_recent_folders()
+        self.update_recent_folders_menu()
+
+    def open_folder(self):
+        """フォルダを開くダイアログ"""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "フォルダを開く",
+            self.start_dir,
+            QFileDialog.ShowDirsOnly
+        )
+        if folder:
+            self.change_folder(folder)
+
+    def change_folder(self, folder_path: str):
+        """作業フォルダを変更"""
+        if not Path(folder_path).is_dir():
+            QMessageBox.warning(self, "エラー", f"フォルダが見つかりません:\n{folder_path}")
+            return
+
+        # 現在の座標を保存
+        self.save_current_corners()
+
+        # フォルダ変更
+        self.start_dir = folder_path
+        self.current_image = None
+        self.config = {}
+
+        # 設定を読み込み
+        self.load_config()
+
+        # ファイル一覧を更新
+        self.load_image_files()
+
+        # キャンバスをクリア
+        self.canvas.clear_image()
+        self.update_coord_labels()
+
+        # タイトル更新
+        self.update_window_title()
+
+        # 最近使用したフォルダに追加
+        self.add_recent_folder(folder_path)
+
     def closeEvent(self, event):
         """終了時に座標を保存"""
         self.save_current_corners()
+        self.add_recent_folder(self.start_dir)
         event.accept()
 
 
