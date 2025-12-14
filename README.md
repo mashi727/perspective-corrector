@@ -32,22 +32,38 @@
 
 ## インストール
 
-### 依存パッケージ
+### pipでインストール（推奨）
+
+```bash
+# GitHubから直接インストール
+pip install git+https://github.com/mashi727/perspective-corrector.git
+```
+
+### 開発用インストール
+
+```bash
+git clone https://github.com/mashi727/perspective-corrector.git
+cd perspective-corrector
+pip install -e .
+```
+
+### 手動インストール
 
 ```bash
 pip install PySide6 opencv-python numpy pillow pillow-heif
 ```
 
-### 実行
+## 実行
 
 ```bash
+# pipインストール後
+perspective-corrector
+
+# または直接実行
 python perspective_corrector.py
-```
 
-ディレクトリを指定して起動:
-
-```bash
-python perspective_corrector.py /path/to/image/directory
+# ディレクトリを指定して起動
+perspective-corrector /path/to/image/directory
 ```
 
 ## 使い方

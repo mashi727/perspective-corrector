@@ -160,41 +160,40 @@ PySide6 (Qt) + OpenCVで構築。
   - 一括処理成功時: 完了ダイアログを削除
 - エラー発生時のみ警告ダイアログを表示
 
+### Phase 8: パッケージ化・GitHub公開
+
+- `pyproject.toml`追加によるpipインストール対応
+- GitHubリポジトリ作成・公開
+- README.md、LICENSE、.gitignore整備
+
 ---
 
 ## ファイル構成
 
 ```
-Day3/
+perspective-corrector/
 ├── perspective_corrector.py    # メインアプリケーション
+├── pyproject.toml              # パッケージ設定
 ├── perspective_corrector.spec  # PyInstallerビルド設定
-├── perspective_config.json     # 座標・設定保存ファイル（自動生成）
+├── requirements.txt            # 依存パッケージ
+├── README.md                   # プロジェクト説明
 ├── BUILD_WINDOWS.md            # Windowsビルド手順
-└── DEVELOPMENT_LOG.md          # 本ファイル
+├── DEVELOPMENT_LOG.md          # 本ファイル
+├── LICENSE                     # MITライセンス
+└── CLAUDE.md                   # Claude Code用設定（gitignore）
 ```
 
 ---
 
-## 依存パッケージ
-
-```
-PySide6
-opencv-python
-numpy
-pillow
-pillow-heif
-```
-
----
-
-## 実行方法
+## インストール・実行
 
 ```bash
-python3 perspective_corrector.py
-```
+# GitHubからインストール
+pip install git+https://github.com/mashi727/perspective-corrector.git
 
-または引数でディレクトリ指定:
+# 実行
+perspective-corrector
 
-```bash
-python3 perspective_corrector.py /path/to/image/directory
+# ディレクトリ指定
+perspective-corrector /path/to/image/directory
 ```
