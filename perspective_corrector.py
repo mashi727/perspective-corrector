@@ -1681,13 +1681,14 @@ class PerspectiveCorrectorApp(QMainWindow):
         dialog = QFileDialog(self, "フォルダを開く", self.start_dir)
         dialog.setFileMode(QFileDialog.Directory)
         dialog.setOption(QFileDialog.ShowDirsOnly, True)
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)  # 非ネイティブダイアログを使用
 
         # ダイアログをアプリウィンドウの中心に配置
         dialog.resize(700, 500)
-        dialog_rect = dialog.frameGeometry()
-        center = self.frameGeometry().center()
-        dialog_rect.moveCenter(center)
-        dialog.move(dialog_rect.topLeft())
+        main_center = self.geometry().center()
+        dialog_x = main_center.x() - dialog.width() // 2
+        dialog_y = main_center.y() - dialog.height() // 2
+        dialog.move(dialog_x, dialog_y)
 
         if dialog.exec() == QFileDialog.Accepted:
             folders = dialog.selectedFiles()
