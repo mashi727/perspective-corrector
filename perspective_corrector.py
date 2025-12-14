@@ -1520,6 +1520,12 @@ class PerspectiveCorrectorApp(QMainWindow):
         self.file_count_label.setText(f"設定済み: {count} ファイル")
         self.process_btn.setEnabled(count > 0)
 
+        # ステータスバーにパス表示
+        if self.current_image:
+            self.statusBar.showMessage(self.current_image)
+        else:
+            self.statusBar.showMessage(f"フォルダ: {self.start_dir}")
+
     def run_batch_process(self):
         """一括処理実行"""
         # 座標が設定されているファイルのみカウント
@@ -1707,6 +1713,9 @@ class PerspectiveCorrectorApp(QMainWindow):
 
         # タイトル更新
         self.update_window_title()
+
+        # ステータス更新
+        self.update_status()
 
         # 最近使用したフォルダに追加
         self.add_recent_folder(folder_path)
