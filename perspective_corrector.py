@@ -1678,14 +1678,21 @@ class PerspectiveCorrectorApp(QMainWindow):
 
     def open_folder(self):
         """フォルダを開くダイアログ"""
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "フォルダを開く",
-            self.start_dir,
-            QFileDialog.ShowDirsOnly
-        )
-        if folder:
-            self.change_folder(folder)
+        dialog = QFileDialog(self, "フォルダを開く", self.start_dir)
+        dialog.setFileMode(QFileDialog.Directory)
+        dialog.setOption(QFileDialog.ShowDirsOnly, True)
+
+        # ダイアログをアプリウィンドウの中心に配置
+        dialog.resize(700, 500)
+        dialog_rect = dialog.frameGeometry()
+        center = self.frameGeometry().center()
+        dialog_rect.moveCenter(center)
+        dialog.move(dialog_rect.topLeft())
+
+        if dialog.exec() == QFileDialog.Accepted:
+            folders = dialog.selectedFiles()
+            if folders:
+                self.change_folder(folders[0])
 
     def change_folder(self, folder_path: str):
         """作業フォルダを変更"""
