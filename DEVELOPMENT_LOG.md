@@ -215,8 +215,7 @@ perspective-corrector/
 ├── README.md                   # プロジェクト説明
 ├── BUILD_WINDOWS.md            # Windowsビルド手順
 ├── DEVELOPMENT_LOG.md          # 本ファイル
-├── LICENSE                     # MITライセンス
-└── CLAUDE.md                   # Claude Code用設定（gitignore）
+└── LICENSE                     # MITライセンス
 ```
 
 ---
