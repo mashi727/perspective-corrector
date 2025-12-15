@@ -1690,9 +1690,14 @@ class PerspectiveCorrectorApp(QMainWindow):
         """PDF出力の一括処理"""
         from PIL import Image
         import io
+        import re
 
-        # 保存先ダイアログ
-        default_name = Path(self.start_dir).name + "_corrected.pdf"
+        # デフォルトファイル名を先頭ファイルの出力名から生成
+        first_file_data = files_to_process[0][1]
+        first_output_name = first_file_data.get("output_name", "output")
+        # _01, _02 などの連番パターンを除去
+        base_name = re.sub(r'_\d+$', '', first_output_name)
+        default_name = base_name + ".pdf"
         dialog = QFileDialog(self, "PDFを保存", str(Path(self.start_dir) / default_name))
         dialog.setAcceptMode(QFileDialog.AcceptSave)
         dialog.setNameFilter("PDF Files (*.pdf)")
