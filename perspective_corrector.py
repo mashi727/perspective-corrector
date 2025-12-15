@@ -1559,16 +1559,63 @@ class PerspectiveCorrectorApp(QMainWindow):
         # 現在の座標を保存
         self.save_current_corners()
 
-        reply = self.show_message_box(
-            QMessageBox.Question, "確認",
-            f"{len(files_to_process)} ファイルの台形補正を実行しますか？\n"
-            "出力ファイルは「[出力名]_corrected.png」として保存されます。",
-            QMessageBox.Yes | QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
+        # 出力形式選択ダイアログ
+        output_format = self.show_output_format_dialog(len(files_to_process))
+        if output_format is None:
             return
 
+        if output_format == "pdf":
+            self.run_batch_process_pdf(files_to_process)
+        else:
+            self.run_batch_process_png(files_to_process)
+
+    def show_output_format_dialog(self, file_count):
+        """出力形式選択ダイアログを表示"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("出力形式の選択")
+        layout = QVBoxLayout(dialog)
+
+        # 説明
+        label = QLabel(f"{file_count} ファイルの台形補正を実行します。\n出力形式を選択してください。")
+        layout.addWidget(label)
+
+        # ラジオボタン
+        from PySide6.QtWidgets import QRadioButton, QButtonGroup
+        self.format_group = QButtonGroup(dialog)
+
+        png_radio = QRadioButton("個別PNG（各ファイルを [出力名]_corrected.png として保存）")
+        png_radio.setChecked(True)
+        self.format_group.addButton(png_radio, 0)
+        layout.addWidget(png_radio)
+
+        pdf_radio = QRadioButton("1つのPDF（全ファイルを1つのPDFにまとめる、A4横）")
+        self.format_group.addButton(pdf_radio, 1)
+        layout.addWidget(pdf_radio)
+
+        # ボタン
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        ok_btn = QPushButton("実行")
+        ok_btn.setStyleSheet("background-color: #27AE60; color: white;")
+        ok_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(ok_btn)
+
+        cancel_btn = QPushButton("キャンセル")
+        cancel_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(cancel_btn)
+
+        layout.addLayout(button_layout)
+
+        dialog.setMinimumWidth(450)
+        self.center_dialog(dialog)
+
+        if dialog.exec() == QDialog.Accepted:
+            return "pdf" if self.format_group.checkedId() == 1 else "png"
+        return None
+
+    def run_batch_process_png(self, files_to_process):
+        """個別PNG出力の一括処理"""
         # プログレスダイアログ
         progress = QProgressDialog("処理中...", "キャンセル", 0, len(files_to_process), self)
         progress.setWindowModality(Qt.WindowModal)
@@ -1613,12 +1660,8 @@ class PerspectiveCorrectorApp(QMainWindow):
                     continue
 
             # OpenCVで台形補正
-            import time
-            start_time = time.time()
             try:
                 if perspective_transform_cv(input_path, corners, str(output_path)):
-                    elapsed = time.time() - start_time
-                    print(f"{rel_path}: {elapsed:.3f}秒")
                     success_count += 1
                 else:
                     error_files.append((rel_path, "変換に失敗しました"))
@@ -1637,6 +1680,136 @@ class PerspectiveCorrectorApp(QMainWindow):
         # エラーがあった場合のみ表示
         if error_files:
             msg = f"処理完了: {success_count}/{len(files_to_process)} ファイル\n\nエラー:\n"
+            for path, err in error_files[:5]:
+                msg += f"  {path}: {err}\n"
+            if len(error_files) > 5:
+                msg += f"  ... 他 {len(error_files) - 5} ファイル"
+            self.show_message_box(QMessageBox.Warning, "エラー", msg)
+
+    def run_batch_process_pdf(self, files_to_process):
+        """PDF出力の一括処理"""
+        from PIL import Image
+        import io
+
+        # 保存先ダイアログ
+        default_name = Path(self.start_dir).name + "_corrected.pdf"
+        dialog = QFileDialog(self, "PDFを保存", str(Path(self.start_dir) / default_name))
+        dialog.setAcceptMode(QFileDialog.AcceptSave)
+        dialog.setNameFilter("PDF Files (*.pdf)")
+        dialog.setDefaultSuffix("pdf")
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+        self.center_dialog(dialog, 700, 500)
+
+        if dialog.exec() != QFileDialog.Accepted:
+            return
+
+        pdf_path = dialog.selectedFiles()[0]
+
+        # プログレスダイアログ
+        progress = QProgressDialog("PDF作成中...", "キャンセル", 0, len(files_to_process) + 1, self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setFixedSize(400, 100)
+        self.center_dialog(progress, 400, 100)
+
+        # A4横サイズ (ポイント単位: 1pt = 1/72 inch)
+        # A4: 210mm x 297mm, 横向き: 297mm x 210mm
+        A4_WIDTH_PT = 841.89  # 297mm
+        A4_HEIGHT_PT = 595.28  # 210mm
+
+        corrected_images = []
+        error_files = []
+        temp_files = []
+
+        for i, (rel_path, data) in enumerate(files_to_process):
+            if progress.wasCanceled():
+                break
+
+            progress.setValue(i)
+            progress.setLabelText(f"処理中: {rel_path}")
+            QApplication.processEvents()
+
+            full_path = Path(self.start_dir) / rel_path
+            if not full_path.exists():
+                error_files.append((rel_path, "ファイルが見つかりません"))
+                continue
+
+            corners = data.get("corners", [])
+            if len(corners) != 4:
+                error_files.append((rel_path, "座標が不完全です"))
+                continue
+
+            # HEICの場合は先に変換
+            input_path = str(full_path)
+            temp_heic = None
+            if str(full_path).lower().endswith(('.heic', '.heif')):
+                temp_heic = convert_heic_to_temp_jpeg(str(full_path))
+                if temp_heic:
+                    input_path = temp_heic
+                    temp_files.append(temp_heic)
+                else:
+                    error_files.append((rel_path, "HEIC変換エラー"))
+                    continue
+
+            # 一時ファイルに台形補正結果を保存
+            temp_output = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            temp_output.close()
+            temp_files.append(temp_output.name)
+
+            try:
+                if perspective_transform_cv(input_path, corners, temp_output.name):
+                    # PILで読み込んでA4横にフィット
+                    img = Image.open(temp_output.name)
+                    img = img.convert('RGB')
+
+                    # A4横に収まるようにリサイズ（アスペクト比維持）
+                    img_width, img_height = img.size
+                    scale = min(A4_WIDTH_PT / img_width, A4_HEIGHT_PT / img_height)
+                    new_width = int(img_width * scale)
+                    new_height = int(img_height * scale)
+
+                    # A4横サイズの白背景に中央配置
+                    a4_img = Image.new('RGB', (int(A4_WIDTH_PT), int(A4_HEIGHT_PT)), 'white')
+                    resized = img.resize((new_width, new_height), Image.LANCZOS)
+                    x = (int(A4_WIDTH_PT) - new_width) // 2
+                    y = (int(A4_HEIGHT_PT) - new_height) // 2
+                    a4_img.paste(resized, (x, y))
+
+                    corrected_images.append(a4_img)
+                else:
+                    error_files.append((rel_path, "変換に失敗しました"))
+            except Exception as e:
+                error_files.append((rel_path, str(e)))
+
+        # PDF保存
+        if corrected_images and not progress.wasCanceled():
+            progress.setLabelText("PDFを保存中...")
+            progress.setValue(len(files_to_process))
+            QApplication.processEvents()
+
+            try:
+                corrected_images[0].save(
+                    pdf_path,
+                    save_all=True,
+                    append_images=corrected_images[1:] if len(corrected_images) > 1 else [],
+                    resolution=72.0
+                )
+            except Exception as e:
+                error_files.append(("PDF保存", str(e)))
+
+        progress.setValue(len(files_to_process) + 1)
+
+        # 一時ファイル削除
+        for temp_file in temp_files:
+            try:
+                if Path(temp_file).exists():
+                    Path(temp_file).unlink()
+            except:
+                pass
+
+        # 結果表示
+        if error_files:
+            msg = f"処理完了: {len(corrected_images)}/{len(files_to_process)} ファイル\n\nエラー:\n"
             for path, err in error_files[:5]:
                 msg += f"  {path}: {err}\n"
             if len(error_files) > 5:

@@ -42,6 +42,12 @@ PySide6 (Qt) + OpenCVで構築。
 5. **一括処理**
    - 設定済み画像を一括で台形補正
    - 出力サイズ: 1920x1080
+   - PNG個別出力またはPDF一括出力を選択可能
+
+6. **PDF出力**
+   - 複数画像を1つのPDFにまとめて出力
+   - A4横サイズ（アスペクト比維持、中央配置）
+   - 保存先をダイアログで選択
 
 ### UI構成
 
@@ -201,6 +207,21 @@ PySide6 (Qt) + OpenCVで構築。
   - バイナリ、データ、hiddenimportsを自動バンドル
 - WindowsでのHEIC/HEIF画像読み込みをサポート
 - BUILD_WINDOWS.mdにHEIC対応の説明を追加
+
+### Phase 12: PDF出力機能
+
+- **出力形式選択ダイアログ**
+  - 一括処理時にPNG/PDF出力を選択可能
+  - `show_output_format_dialog()`メソッド追加
+- **PDF出力機能**
+  - 複数画像を1つのPDFファイルにまとめて出力
+  - A4横サイズ (841.89 x 595.28 pt / 297mm x 210mm)
+  - アスペクト比を維持して最大サイズで中央配置
+  - 保存先をダイアログで選択
+  - Pillowによるマルチページ PDF生成
+- **実装詳細**
+  - `run_batch_process_png()`: 従来のPNG個別出力
+  - `run_batch_process_pdf()`: 新規PDF出力処理
 
 ---
 
