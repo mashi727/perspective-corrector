@@ -1442,6 +1442,69 @@ class PerspectiveCorrectorApp(QMainWindow):
         help_label.setStyleSheet("color: #888; padding: 5px;")
         right_layout.addWidget(help_label)
 
+        # 設定パネル（認識設定、色調設定、色調補正トグル）
+        settings_panel = QWidget()
+        settings_layout = QHBoxLayout(settings_panel)
+        settings_layout.setContentsMargins(0, 0, 0, 5)
+
+        # 認識設定 - 紫（設定/調整）
+        self.settings_btn = QPushButton("認識設定")
+        self.settings_btn.setMinimumHeight(32)
+        self.settings_btn.setMinimumWidth(90)
+        self.settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9B59B6;
+                color: white;
+                font-size: 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #8E44AD;
+            }
+        """)
+        self.settings_btn.clicked.connect(self.show_detection_settings)
+        settings_layout.addWidget(self.settings_btn)
+
+        # 色調設定 - シアン（色調整）
+        self.color_settings_btn = QPushButton("色調設定")
+        self.color_settings_btn.setMinimumHeight(32)
+        self.color_settings_btn.setMinimumWidth(90)
+        self.color_settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #17A2B8;
+                color: white;
+                font-size: 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+        """)
+        self.color_settings_btn.clicked.connect(self.show_color_settings)
+        settings_layout.addWidget(self.color_settings_btn)
+
+        settings_layout.addSpacing(20)
+
+        # 色調補正トグル
+        from PySide6.QtWidgets import QCheckBox
+        self.color_correction_toggle = QCheckBox("色調補正")
+        self.color_correction_toggle.setChecked(self.color_settings.get('enabled', True))
+        self.color_correction_toggle.setStyleSheet("""
+            QCheckBox {
+                font-size: 12px;
+                color: #333;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+            }
+        """)
+        self.color_correction_toggle.stateChanged.connect(self.on_color_correction_toggled)
+        settings_layout.addWidget(self.color_correction_toggle)
+
+        settings_layout.addStretch()
+        right_layout.addWidget(settings_panel)
+
         # 画像キャンバス
         self.canvas = ImageCanvas()
         self.canvas.coordinates_changed.connect(self.on_coordinates_changed)
@@ -1502,42 +1565,6 @@ class PerspectiveCorrectorApp(QMainWindow):
         """)
         self.auto_detect_btn.clicked.connect(self.run_auto_detect)
         bottom_layout.addWidget(self.auto_detect_btn)
-
-        # 認識設定 - 紫（設定/調整）
-        self.settings_btn = QPushButton("認識設定")
-        self.settings_btn.setMinimumHeight(40)
-        self.settings_btn.setMinimumWidth(90)
-        self.settings_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9B59B6;
-                color: white;
-                font-size: 13px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #8E44AD;
-            }
-        """)
-        self.settings_btn.clicked.connect(self.show_detection_settings)
-        bottom_layout.addWidget(self.settings_btn)
-
-        # 色調設定 - シアン（色調整）
-        self.color_settings_btn = QPushButton("色調設定")
-        self.color_settings_btn.setMinimumHeight(40)
-        self.color_settings_btn.setMinimumWidth(90)
-        self.color_settings_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #17A2B8;
-                color: white;
-                font-size: 13px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #138496;
-            }
-        """)
-        self.color_settings_btn.clicked.connect(self.show_color_settings)
-        bottom_layout.addWidget(self.color_settings_btn)
 
         # 一括処理 - 緑（実行/確定）
         self.process_btn = QPushButton("一括処理")
@@ -1836,7 +1863,19 @@ class PerspectiveCorrectorApp(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             self.color_settings = dialog.get_settings()
             self.save_config()
+            # トグルを同期
+            self.color_correction_toggle.blockSignals(True)
+            self.color_correction_toggle.setChecked(self.color_settings.get('enabled', True))
+            self.color_correction_toggle.blockSignals(False)
             self.statusBar.showMessage("色調補正設定を保存しました")
+
+    def on_color_correction_toggled(self, state):
+        """色調補正トグルの切り替え"""
+        enabled = state == Qt.Checked
+        self.color_settings['enabled'] = enabled
+        self.save_config()
+        status = "有効" if enabled else "無効"
+        self.statusBar.showMessage(f"色調補正を{status}にしました")
 
     def run_auto_detect(self):
         """現在の画像で自動認識を実行"""
