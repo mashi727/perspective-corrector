@@ -59,48 +59,69 @@ def convert_heic_to_temp_jpeg(heic_path: str) -> str:
     return None
 
 
-def auto_color_correction(img: np.ndarray) -> np.ndarray:
+def auto_color_correction(img: np.ndarray, settings: dict = None) -> np.ndarray:
     """
     自動色調補正（ホワイトバランス + CLAHE）
 
     Args:
         img: 入力画像（BGR形式）
+        settings: 色調補正パラメータ辞書
+            - enabled: 色調補正の有効/無効 (デフォルト: True)
+            - white_balance: ホワイトバランス補正の有効/無効 (デフォルト: True)
+            - clahe_enabled: CLAHEの有効/無効 (デフォルト: True)
+            - clahe_clip_limit: CLAHEのclipLimit (デフォルト: 2.0)
+            - clahe_grid_size: CLAHEのtileGridSize (デフォルト: 8)
 
     Returns:
         色調補正後の画像
     """
+    if settings is None:
+        settings = {}
+
+    # 色調補正が無効の場合はそのまま返す
+    if not settings.get('enabled', True):
+        return img
+
+    result = img.copy()
+
     # 1. ホワイトバランス補正（Gray World assumption）
-    result = img.astype(np.float32)
-    avg_b = np.mean(result[:, :, 0])
-    avg_g = np.mean(result[:, :, 1])
-    avg_r = np.mean(result[:, :, 2])
-    avg_gray = (avg_b + avg_g + avg_r) / 3
+    if settings.get('white_balance', True):
+        result = result.astype(np.float32)
+        avg_b = np.mean(result[:, :, 0])
+        avg_g = np.mean(result[:, :, 1])
+        avg_r = np.mean(result[:, :, 2])
+        avg_gray = (avg_b + avg_g + avg_r) / 3
 
-    if avg_b > 0:
-        result[:, :, 0] = result[:, :, 0] * (avg_gray / avg_b)
-    if avg_g > 0:
-        result[:, :, 1] = result[:, :, 1] * (avg_gray / avg_g)
-    if avg_r > 0:
-        result[:, :, 2] = result[:, :, 2] * (avg_gray / avg_r)
+        if avg_b > 0:
+            result[:, :, 0] = result[:, :, 0] * (avg_gray / avg_b)
+        if avg_g > 0:
+            result[:, :, 1] = result[:, :, 1] * (avg_gray / avg_g)
+        if avg_r > 0:
+            result[:, :, 2] = result[:, :, 2] * (avg_gray / avg_r)
 
-    result = np.clip(result, 0, 255).astype(np.uint8)
+        result = np.clip(result, 0, 255).astype(np.uint8)
 
     # 2. CLAHE（Contrast Limited Adaptive Histogram Equalization）
-    # LAB色空間に変換してL（輝度）チャンネルのみに適用
-    lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
+    if settings.get('clahe_enabled', True):
+        clip_limit = settings.get('clahe_clip_limit', 2.0)
+        grid_size = settings.get('clahe_grid_size', 8)
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
+        # LAB色空間に変換してL（輝度）チャンネルのみに適用
+        lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
 
-    lab = cv2.merge([l, a, b])
-    result = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(grid_size, grid_size))
+        l = clahe.apply(l)
+
+        lab = cv2.merge([l, a, b])
+        result = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
     return result
 
 
 def perspective_transform_cv(input_path: str, corners: list, output_path: str,
-                              output_size: tuple = (1920, 1080)) -> bool:
+                              output_size: tuple = (1920, 1080),
+                              color_settings: dict = None) -> bool:
     """
     OpenCVによる台形補正
 
@@ -109,6 +130,7 @@ def perspective_transform_cv(input_path: str, corners: list, output_path: str,
         corners: 4隅の座標 [(x,y), ...] 左上、右上、右下、左下の順
         output_path: 出力画像パス
         output_size: 出力サイズ (width, height)
+        color_settings: 色調補正パラメータ辞書
 
     Returns:
         成功時True
@@ -132,7 +154,7 @@ def perspective_transform_cv(input_path: str, corners: list, output_path: str,
         result = cv2.warpPerspective(img, matrix, output_size)
 
         # 自動色調補正を適用
-        result = auto_color_correction(result)
+        result = auto_color_correction(result, color_settings)
 
         # 拡張子に応じて保存
         output_path_str = str(output_path)
@@ -518,6 +540,233 @@ class DetectionSettingsDialog(QDialog):
     def get_detected_corners(self):
         """検出されたコーナーを返す"""
         return self.detected_corners
+
+
+class ColorCorrectionSettingsDialog(QDialog):
+    """色調補正パラメータ設定ダイアログ（プレビュー付き）"""
+
+    def __init__(self, parent=None, settings=None, image_path=None, corners=None):
+        super().__init__(parent)
+        self.setWindowTitle("色調補正設定")
+        self.setMinimumSize(900, 600)
+        self.main_app = parent
+        self.image_path = image_path
+        self.corners = corners  # 台形補正用の座標
+
+        # 現在の設定（デフォルト値）
+        self.settings = settings or {}
+
+        layout = QHBoxLayout(self)
+
+        # === 左側: パラメータ設定 ===
+        left_panel = QVBoxLayout()
+
+        # 色調補正有効/無効
+        from PySide6.QtWidgets import QCheckBox
+        self.enabled_check = QCheckBox("色調補正を有効にする")
+        self.enabled_check.setChecked(self.settings.get('enabled', True))
+        self.enabled_check.stateChanged.connect(self.on_value_changed)
+        left_panel.addWidget(self.enabled_check)
+
+        left_panel.addSpacing(10)
+
+        # ホワイトバランス
+        self.white_balance_check = QCheckBox("ホワイトバランス補正")
+        self.white_balance_check.setChecked(self.settings.get('white_balance', True))
+        self.white_balance_check.setToolTip("プロジェクターの色かぶりを補正")
+        self.white_balance_check.stateChanged.connect(self.on_value_changed)
+        left_panel.addWidget(self.white_balance_check)
+
+        left_panel.addSpacing(10)
+
+        # CLAHE設定
+        clahe_group = QGroupBox("CLAHE（コントラスト強調）")
+        clahe_layout = QVBoxLayout()
+
+        self.clahe_check = QCheckBox("CLAHEを有効にする")
+        self.clahe_check.setChecked(self.settings.get('clahe_enabled', True))
+        self.clahe_check.setToolTip("暗い部分のコントラストを改善")
+        self.clahe_check.stateChanged.connect(self.on_value_changed)
+        clahe_layout.addWidget(self.clahe_check)
+
+        form = QFormLayout()
+
+        # clipLimit
+        self.clip_limit = QDoubleSpinBox()
+        self.clip_limit.setRange(1.0, 10.0)
+        self.clip_limit.setSingleStep(0.5)
+        self.clip_limit.setDecimals(1)
+        self.clip_limit.setValue(self.settings.get('clahe_clip_limit', 2.0))
+        self.clip_limit.setToolTip("大きいほどコントラストが強調（推奨: 1.5-4.0）")
+        self.clip_limit.valueChanged.connect(self.on_value_changed)
+        form.addRow("コントラスト制限:", self.clip_limit)
+
+        # gridSize
+        self.grid_size = QSpinBox()
+        self.grid_size.setRange(2, 16)
+        self.grid_size.setValue(self.settings.get('clahe_grid_size', 8))
+        self.grid_size.setToolTip("小さいほど局所的に補正（推奨: 4-12）")
+        self.grid_size.valueChanged.connect(self.on_value_changed)
+        form.addRow("グリッドサイズ:", self.grid_size)
+
+        clahe_layout.addLayout(form)
+        clahe_group.setLayout(clahe_layout)
+        left_panel.addWidget(clahe_group)
+
+        # ステータスラベル
+        self.status_label = QLabel("※ パラメータ変更でプレビュー更新")
+        self.status_label.setStyleSheet("color: #888; font-size: 11px; margin-top: 10px;")
+        left_panel.addWidget(self.status_label)
+
+        left_panel.addStretch()
+
+        # ボタン
+        self.reset_btn = QPushButton("デフォルトに戻す")
+        self.reset_btn.clicked.connect(self.reset_to_default)
+        left_panel.addWidget(self.reset_btn)
+
+        button_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #27AE60; color: white;")
+        self.ok_btn.clicked.connect(self.accept)
+        button_layout.addWidget(self.ok_btn)
+
+        self.cancel_btn = QPushButton("キャンセル")
+        self.cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_btn)
+        left_panel.addLayout(button_layout)
+
+        layout.addLayout(left_panel)
+
+        # === 右側: プレビュー（補正前/補正後） ===
+        preview_panel = QVBoxLayout()
+
+        # 補正前ラベル
+        preview_panel.addWidget(QLabel("▼ 補正前"))
+        self.before_label = QLabel()
+        self.before_label.setMinimumSize(300, 200)
+        self.before_label.setAlignment(Qt.AlignCenter)
+        self.before_label.setStyleSheet("background-color: #222; border: 1px solid #444;")
+        preview_panel.addWidget(self.before_label, 1)
+
+        # 補正後ラベル
+        preview_panel.addWidget(QLabel("▼ 補正後"))
+        self.after_label = QLabel()
+        self.after_label.setMinimumSize(300, 200)
+        self.after_label.setAlignment(Qt.AlignCenter)
+        self.after_label.setStyleSheet("background-color: #222; border: 1px solid #444;")
+        preview_panel.addWidget(self.after_label, 1)
+
+        layout.addLayout(preview_panel, 1)
+
+        # 初期プレビュー
+        self.load_preview_image()
+        self.on_value_changed()
+
+    def load_preview_image(self):
+        """プレビュー用画像を読み込み（台形補正を適用）"""
+        if not self.image_path or not self.corners or len(self.corners) != 4:
+            self.before_label.setText("画像または座標が\n設定されていません")
+            self.after_label.setText("")
+            self.original_image = None
+            return
+
+        # HEICの場合は変換
+        input_path = self.image_path
+        if self.image_path.lower().endswith(('.heic', '.heif')):
+            temp_path = convert_heic_to_temp_jpeg(self.image_path)
+            if temp_path:
+                input_path = temp_path
+
+        # 画像を読み込み
+        img = cv2.imread(input_path)
+        if img is None:
+            self.before_label.setText("画像を読み込めません")
+            self.original_image = None
+            return
+
+        # 台形補正を適用（色調補正なし）
+        src = np.float32(self.corners)
+        output_size = (960, 540)  # プレビュー用に小さめ
+        w, h = output_size
+        dst = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+        matrix = cv2.getPerspectiveTransform(src, dst)
+        self.original_image = cv2.warpPerspective(img, matrix, output_size)
+
+    def update_preview(self):
+        """プレビュー画像を更新"""
+        if self.original_image is None:
+            return
+
+        # 補正前画像を表示
+        before_rgb = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2RGB)
+        h, w, ch = before_rgb.shape
+        bytes_per_line = ch * w
+        from PySide6.QtGui import QImage
+        before_qimg = QImage(before_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        before_pixmap = QPixmap.fromImage(before_qimg)
+
+        preview_w = self.before_label.width() - 10
+        preview_h = self.before_label.height() - 10
+        scaled_before = before_pixmap.scaled(preview_w, preview_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.before_label.setPixmap(scaled_before)
+
+        # 色調補正を適用
+        current_settings = self.get_settings()
+        corrected = auto_color_correction(self.original_image, current_settings)
+
+        # 補正後画像を表示
+        after_rgb = cv2.cvtColor(corrected, cv2.COLOR_BGR2RGB)
+        after_qimg = QImage(after_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        after_pixmap = QPixmap.fromImage(after_qimg)
+        scaled_after = after_pixmap.scaled(preview_w, preview_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.after_label.setPixmap(scaled_after)
+
+    def on_value_changed(self):
+        """パラメータ変更時の処理"""
+        # CLAHE関連のウィジェットの有効/無効
+        clahe_enabled = self.clahe_check.isChecked() and self.enabled_check.isChecked()
+        self.clip_limit.setEnabled(clahe_enabled)
+        self.grid_size.setEnabled(clahe_enabled)
+
+        # ホワイトバランスの有効/無効
+        self.white_balance_check.setEnabled(self.enabled_check.isChecked())
+        self.clahe_check.setEnabled(self.enabled_check.isChecked())
+
+        self.update_preview()
+
+    def reset_to_default(self):
+        """デフォルト値に戻す"""
+        self.enabled_check.setChecked(True)
+        self.white_balance_check.setChecked(True)
+        self.clahe_check.setChecked(True)
+        self.clip_limit.setValue(2.0)
+        self.grid_size.setValue(8)
+
+    def get_settings(self):
+        """現在の設定を辞書で返す"""
+        return {
+            'enabled': self.enabled_check.isChecked(),
+            'white_balance': self.white_balance_check.isChecked(),
+            'clahe_enabled': self.clahe_check.isChecked(),
+            'clahe_clip_limit': self.clip_limit.value(),
+            'clahe_grid_size': self.grid_size.value()
+        }
+
+    def showEvent(self, event):
+        """表示時に親ウィンドウの中央に配置"""
+        super().showEvent(event)
+        QTimer.singleShot(0, self._center_on_parent)
+
+    def _center_on_parent(self):
+        """親ウィンドウの中央に配置"""
+        if self.parent():
+            main_geo = self.parent().geometry()
+            main_center_x = main_geo.x() + main_geo.width() // 2
+            main_center_y = main_geo.y() + main_geo.height() // 2
+            dialog_x = main_center_x - self.width() // 2
+            dialog_y = main_center_y - self.height() // 2
+            self.move(dialog_x, dialog_y)
 
 
 class ImageCanvas(QLabel):
@@ -1056,6 +1305,7 @@ class PerspectiveCorrectorApp(QMainWindow):
         self.current_image = None
         self.config = {}
         self.detection_settings = {}  # 自動認識パラメータ
+        self.color_settings = {}  # 色調補正パラメータ
         self.recent_folders = []  # 最近使用したフォルダ
 
         self.load_recent_folders()
@@ -1072,20 +1322,24 @@ class PerspectiveCorrectorApp(QMainWindow):
                     data = json.load(f)
                     # 検出設定を分離
                     self.detection_settings = data.pop('_detection_settings', {})
+                    self.color_settings = data.pop('_color_settings', {})
                     self.config = data
             except Exception as e:
                 print(f"Config load error: {e}")
                 self.config = {}
                 self.detection_settings = {}
+                self.color_settings = {}
 
     def save_config(self):
         """設定ファイルに保存"""
         config_path = Path(self.start_dir) / self.CONFIG_FILE
         try:
-            # 検出設定を含めて保存
+            # 検出設定・色調設定を含めて保存
             data = dict(self.config)
             if self.detection_settings:
                 data['_detection_settings'] = self.detection_settings
+            if self.color_settings:
+                data['_color_settings'] = self.color_settings
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
@@ -1266,6 +1520,24 @@ class PerspectiveCorrectorApp(QMainWindow):
         """)
         self.settings_btn.clicked.connect(self.show_detection_settings)
         bottom_layout.addWidget(self.settings_btn)
+
+        # 色調設定 - シアン（色調整）
+        self.color_settings_btn = QPushButton("色調設定")
+        self.color_settings_btn.setMinimumHeight(40)
+        self.color_settings_btn.setMinimumWidth(90)
+        self.color_settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #17A2B8;
+                color: white;
+                font-size: 13px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+        """)
+        self.color_settings_btn.clicked.connect(self.show_color_settings)
+        bottom_layout.addWidget(self.color_settings_btn)
 
         # 一括処理 - 緑（実行/確定）
         self.process_btn = QPushButton("一括処理")
@@ -1546,6 +1818,26 @@ class PerspectiveCorrectorApp(QMainWindow):
             else:
                 self.statusBar.showMessage("認識設定を保存しました")
 
+    def show_color_settings(self):
+        """色調補正設定ダイアログを表示"""
+        # 画像パスを取得（HEIC対応）
+        image_path = None
+        corners = None
+        if self.current_image:
+            image_path = self.current_image
+            if image_path.lower().endswith(('.heic', '.heif')) and self.canvas.temp_file:
+                image_path = self.canvas.temp_file
+            # 現在の座標を取得
+            corners = self.canvas.corners if len(self.canvas.corners) == 4 else None
+
+        dialog = ColorCorrectionSettingsDialog(self, self.color_settings, image_path, corners)
+        dialog.resize(900, 600)
+        self.center_dialog(dialog, 900, 600)
+        if dialog.exec() == QDialog.Accepted:
+            self.color_settings = dialog.get_settings()
+            self.save_config()
+            self.statusBar.showMessage("色調補正設定を保存しました")
+
     def run_auto_detect(self):
         """現在の画像で自動認識を実行"""
         if not self.current_image:
@@ -1704,7 +1996,8 @@ class PerspectiveCorrectorApp(QMainWindow):
 
             # OpenCVで台形補正
             try:
-                if perspective_transform_cv(input_path, corners, str(output_path)):
+                if perspective_transform_cv(input_path, corners, str(output_path),
+                                           color_settings=self.color_settings):
                     success_count += 1
                 else:
                     error_files.append((rel_path, "変換に失敗しました"))
@@ -1800,7 +2093,8 @@ class PerspectiveCorrectorApp(QMainWindow):
             temp_files.append(temp_output.name)
 
             try:
-                if perspective_transform_cv(input_path, corners, temp_output.name):
+                if perspective_transform_cv(input_path, corners, temp_output.name,
+                                           color_settings=self.color_settings):
                     # PILで読み込んでA4横にフィット
                     img = Image.open(temp_output.name)
                     img = img.convert('RGB')
