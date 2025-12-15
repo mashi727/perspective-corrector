@@ -59,6 +59,46 @@ def convert_heic_to_temp_jpeg(heic_path: str) -> str:
     return None
 
 
+def auto_color_correction(img: np.ndarray) -> np.ndarray:
+    """
+    自動色調補正（ホワイトバランス + CLAHE）
+
+    Args:
+        img: 入力画像（BGR形式）
+
+    Returns:
+        色調補正後の画像
+    """
+    # 1. ホワイトバランス補正（Gray World assumption）
+    result = img.astype(np.float32)
+    avg_b = np.mean(result[:, :, 0])
+    avg_g = np.mean(result[:, :, 1])
+    avg_r = np.mean(result[:, :, 2])
+    avg_gray = (avg_b + avg_g + avg_r) / 3
+
+    if avg_b > 0:
+        result[:, :, 0] = result[:, :, 0] * (avg_gray / avg_b)
+    if avg_g > 0:
+        result[:, :, 1] = result[:, :, 1] * (avg_gray / avg_g)
+    if avg_r > 0:
+        result[:, :, 2] = result[:, :, 2] * (avg_gray / avg_r)
+
+    result = np.clip(result, 0, 255).astype(np.uint8)
+
+    # 2. CLAHE（Contrast Limited Adaptive Histogram Equalization）
+    # LAB色空間に変換してL（輝度）チャンネルのみに適用
+    lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+
+    lab = cv2.merge([l, a, b])
+    result = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+    return result
+
+
 def perspective_transform_cv(input_path: str, corners: list, output_path: str,
                               output_size: tuple = (1920, 1080)) -> bool:
     """
@@ -90,6 +130,9 @@ def perspective_transform_cv(input_path: str, corners: list, output_path: str,
 
         # 台形補正を適用
         result = cv2.warpPerspective(img, matrix, output_size)
+
+        # 自動色調補正を適用
+        result = auto_color_correction(result)
 
         # 拡張子に応じて保存
         output_path_str = str(output_path)
