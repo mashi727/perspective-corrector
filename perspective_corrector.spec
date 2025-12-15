@@ -1,20 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec file for perspective_corrector
 
+from PyInstaller.utils.hooks import collect_all
+
 block_cipher = None
+
+# pillow-heif の依存関係を収集
+pillow_heif_datas, pillow_heif_binaries, pillow_heif_hiddenimports = collect_all('pillow_heif')
 
 a = Analysis(
     ['perspective_corrector.py'],
     pathex=[],
-    binaries=[],
-    datas=[],
+    binaries=pillow_heif_binaries,
+    datas=pillow_heif_datas,
     hiddenimports=[
         'PySide6.QtCore',
         'PySide6.QtGui',
         'PySide6.QtWidgets',
         'cv2',
         'numpy',
-    ],
+        'PIL',
+        'PIL.Image',
+        'pillow_heif',
+    ] + pillow_heif_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

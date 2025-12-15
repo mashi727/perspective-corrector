@@ -194,6 +194,14 @@ PySide6 (Qt) + OpenCVで構築。
   - `showEvent`オーバーライドで表示時に中央配置
   - レイアウト確定後のサイズで正確に配置
 
+### Phase 11: Windows HEIC対応強化
+
+- **PyInstaller設定の改善**
+  - `collect_all('pillow_heif')`で依存関係を自動収集
+  - バイナリ、データ、hiddenimportsを自動バンドル
+- WindowsでのHEIC/HEIF画像読み込みをサポート
+- BUILD_WINDOWS.mdにHEIC対応の説明を追加
+
 ---
 
 ## ファイル構成

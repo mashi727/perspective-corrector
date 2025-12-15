@@ -67,6 +67,14 @@ pyinstaller --onefile --noconsole --icon=app.ico --name PerspectiveCorrector per
 - ウイルス対策ソフトが誤検知する場合は、除外設定を行ってください
 - ビルド時に`build/`と`dist/`ディレクトリが作成されます
 
+## HEIC/HEIF対応について
+
+WindowsでHEIC/HEIF画像（iPhoneで撮影した写真など）を読み込むには、`pillow-heif`パッケージが必要です。
+
+- `pillow-heif`は依存パッケージに含まれているため、上記手順でインストールすれば自動的に対応されます
+- `perspective_corrector.spec`には`pillow-heif`の依存関係を自動収集する設定が含まれています
+- ビルド時に`collect_all('pillow_heif')`により必要なバイナリが自動的にバンドルされます
+
 ## トラブルシューティング
 
 ### DLLが見つからないエラー
