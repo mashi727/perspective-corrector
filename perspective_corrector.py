@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QFormLayout, QSpinBox, QDoubleSpinBox,
     QDialogButtonBox, QSlider, QFileDialog, QMenuBar, QMenu
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QMouseEvent, QBrush, QAction, QKeySequence
 
 
@@ -449,6 +449,11 @@ class DetectionSettingsDialog(QDialog):
     def showEvent(self, event):
         """表示時に親ウィンドウの中央に配置"""
         super().showEvent(event)
+        # レイアウト確定後に中央配置を実行
+        QTimer.singleShot(0, self._center_on_parent)
+
+    def _center_on_parent(self):
+        """親ウィンドウの中央に配置"""
         if self.parent():
             main_geo = self.parent().geometry()
             main_center_x = main_geo.x() + main_geo.width() // 2
