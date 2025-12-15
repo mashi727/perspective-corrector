@@ -560,15 +560,7 @@ class ColorCorrectionSettingsDialog(QDialog):
 
         # === 左側: パラメータ設定 ===
         left_panel = QVBoxLayout()
-
-        # 色調補正有効/無効
         from PySide6.QtWidgets import QCheckBox
-        self.enabled_check = QCheckBox("色調補正を有効にする")
-        self.enabled_check.setChecked(self.settings.get('enabled', True))
-        self.enabled_check.stateChanged.connect(self.on_value_changed)
-        left_panel.addWidget(self.enabled_check)
-
-        left_panel.addSpacing(10)
 
         # ホワイトバランス
         self.white_balance_check = QCheckBox("ホワイトバランス補正")
@@ -725,28 +717,23 @@ class ColorCorrectionSettingsDialog(QDialog):
     def on_value_changed(self):
         """パラメータ変更時の処理"""
         # CLAHE関連のウィジェットの有効/無効
-        clahe_enabled = self.clahe_check.isChecked() and self.enabled_check.isChecked()
+        clahe_enabled = self.clahe_check.isChecked()
         self.clip_limit.setEnabled(clahe_enabled)
         self.grid_size.setEnabled(clahe_enabled)
-
-        # ホワイトバランスの有効/無効
-        self.white_balance_check.setEnabled(self.enabled_check.isChecked())
-        self.clahe_check.setEnabled(self.enabled_check.isChecked())
 
         self.update_preview()
 
     def reset_to_default(self):
         """デフォルト値に戻す"""
-        self.enabled_check.setChecked(True)
         self.white_balance_check.setChecked(True)
         self.clahe_check.setChecked(True)
         self.clip_limit.setValue(2.0)
         self.grid_size.setValue(8)
 
     def get_settings(self):
-        """現在の設定を辞書で返す"""
+        """現在の設定を辞書で返す（enabledは外部から渡された値を維持）"""
         return {
-            'enabled': self.enabled_check.isChecked(),
+            'enabled': self.settings.get('enabled', True),
             'white_balance': self.white_balance_check.isChecked(),
             'clahe_enabled': self.clahe_check.isChecked(),
             'clahe_clip_limit': self.clip_limit.value(),
@@ -812,6 +799,9 @@ class ImageCanvas(QLabel):
         # 色調補正設定（プレビュー用）
         self.color_settings = {}
         self.preview_pixmap = None  # 補正プレビュー画像
+        self.color_corrected_pixmap = None  # 色調補正済み画像キャッシュ
+        self.color_correction_cache_valid = False  # キャッシュ有効フラグ
+        self.scaled_image_cache = None  # スケーリング済み画像キャッシュ（コーナーなし）
 
         # 4隅の座標（表示座標系）
         self.corners = []  # [(x, y), ...]
@@ -853,6 +843,9 @@ class ImageCanvas(QLabel):
 
         self.original_size = (self.original_pixmap.width(), self.original_pixmap.height())
         self.corners = []
+        self.color_correction_cache_valid = False  # キャッシュを無効化
+        self.color_corrected_pixmap = None
+        self.scaled_image_cache = None  # スケーリングキャッシュも無効化
         self.update_display()
         return True
 
@@ -878,9 +871,11 @@ class ImageCanvas(QLabel):
 
     def set_color_settings(self, settings: dict):
         """色調補正設定を更新"""
-        self.color_settings = settings
+        self.color_settings = settings.copy()  # 明示的にコピー
         self.preview_pixmap = None  # キャッシュをクリア
+        self.color_correction_cache_valid = False  # 色調補正キャッシュを無効化
         self.update_display()
+        self.repaint()  # 強制再描画
 
     def generate_preview(self):
         """台形補正+色調補正のプレビュー画像を生成"""
@@ -921,6 +916,78 @@ class ImageCanvas(QLabel):
         qimg = QImage(result_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
         return QPixmap.fromImage(qimg.copy())
 
+    def generate_preview_full(self):
+        """台形補正+色調補正のフルサイズプレビュー画像を生成（1920x1080）"""
+        if not self.original_pixmap or len(self.corners) != 4:
+            return None
+
+        # 元画像座標を取得
+        corners_orig = self.get_corners_original()
+
+        # 画像読み込みパス
+        load_path = self.temp_file if self.temp_file else self.image_path
+        if not load_path:
+            return None
+
+        # OpenCVで画像読み込み
+        img = cv2.imread(load_path)
+        if img is None:
+            return None
+
+        # フルサイズ出力（出力サイズと同一）
+        output_size = (1920, 1080)
+        src = np.float32(corners_orig)
+        w, h = output_size
+        dst = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+
+        # 台形補正
+        matrix = cv2.getPerspectiveTransform(src, dst)
+        result = cv2.warpPerspective(img, matrix, output_size)
+
+        # 色調補正
+        result = auto_color_correction(result, self.color_settings)
+
+        # QPixmapに変換
+        result_rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+        h, w, ch = result_rgb.shape
+        bytes_per_line = ch * w
+        from PySide6.QtGui import QImage
+        qimg = QImage(result_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        return QPixmap.fromImage(qimg.copy())
+
+    def get_display_image(self):
+        """表示用画像を取得（色調補正ON時は補正適用、キャッシュ使用）"""
+        if not self.color_settings.get('enabled', True):
+            # 色調補正OFFの場合はオリジナル画像
+            return self.original_pixmap
+
+        # キャッシュが有効な場合はキャッシュを返す
+        if self.color_correction_cache_valid and self.color_corrected_pixmap:
+            return self.color_corrected_pixmap
+
+        # 色調補正ONの場合は補正を適用
+        load_path = self.temp_file if self.temp_file else self.image_path
+        if not load_path:
+            return self.original_pixmap
+
+        # OpenCVで画像読み込み
+        img = cv2.imread(load_path)
+        if img is None:
+            return self.original_pixmap
+
+        # 色調補正を適用
+        result = auto_color_correction(img, self.color_settings)
+
+        # QPixmapに変換
+        result_rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+        h, w, ch = result_rgb.shape
+        bytes_per_line = ch * w
+        from PySide6.QtGui import QImage
+        qimg = QImage(result_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        self.color_corrected_pixmap = QPixmap.fromImage(qimg.copy())
+        self.color_correction_cache_valid = True
+        return self.color_corrected_pixmap
+
     def update_display(self):
         """表示を更新"""
         if not self.original_pixmap:
@@ -940,8 +1007,11 @@ class ImageCanvas(QLabel):
         new_w = int(img_w * target_scale)
         new_h = int(img_h * target_scale)
 
+        # 表示用画像を準備（色調補正適用の有無）
+        display_source = self.get_display_image()
+
         # スケーリング（IgnoreAspectRatioで正確なサイズを指定）
-        scaled = self.original_pixmap.scaled(
+        scaled = display_source.scaled(
             new_w, new_h,
             Qt.IgnoreAspectRatio,
             Qt.SmoothTransformation
@@ -959,9 +1029,25 @@ class ImageCanvas(QLabel):
         self.display_pixmap.fill(QColor("#2d2d2d"))
 
         painter = QPainter(self.display_pixmap)
-        painter.drawPixmap(self.offset_x, self.offset_y, scaled)
 
-        # 座標点を描画
+        # オリジナル画像（色調補正適用済みまたは未適用）を表示
+        painter.drawPixmap(self.offset_x, self.offset_y, scaled)
+        painter.end()
+
+        # スケーリング済み画像をキャッシュ（コーナーなし）
+        self.scaled_image_cache = self.display_pixmap.copy()
+
+        # 四隅マーカーを描画
+        self._draw_corners()
+
+    def _draw_corners(self):
+        """四隅マーカーを描画（内部用）"""
+        if not self.display_pixmap:
+            return
+
+        painter = QPainter(self.display_pixmap)
+
+        # 四隅マーカーを描画（常に表示）
         if self.corners:
             # 線を描画
             pen = QPen(QColor(0, 255, 255), 2)
@@ -972,6 +1058,7 @@ class ImageCanvas(QLabel):
                         int(self.corners[i-1][0]), int(self.corners[i-1][1]),
                         int(self.corners[i][0]), int(self.corners[i][1])
                     )
+            # 4隅設定完了時は閉じる
             if len(self.corners) == 4:
                 painter.drawLine(
                     int(self.corners[3][0]), int(self.corners[3][1]),
@@ -1020,42 +1107,20 @@ class ImageCanvas(QLabel):
             painter.drawText(box_x + box_padding, box_y + box_padding + fm.ascent(),
                            self.guide_message)
 
-        # 4隅が設定されている場合、プレビューを右下に表示
-        if len(self.corners) == 4:
-            preview = self.generate_preview()
-            if preview:
-                # プレビューサイズを調整（キャンバスの1/4程度）
-                preview_max_w = self.width() // 3
-                preview_max_h = self.height() // 3
-                scaled_preview = preview.scaled(
-                    preview_max_w, preview_max_h,
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-
-                # 右下に配置（マージン10px）
-                margin = 10
-                preview_x = self.width() - scaled_preview.width() - margin
-                preview_y = self.height() - scaled_preview.height() - margin
-
-                # 枠線付きで描画
-                painter.setPen(QPen(QColor(0, 255, 255), 2))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawRect(preview_x - 2, preview_y - 2,
-                               scaled_preview.width() + 4, scaled_preview.height() + 4)
-                painter.drawPixmap(preview_x, preview_y, scaled_preview)
-
-                # ラベル
-                label = "プレビュー（色調補正: " + ("ON" if self.color_settings.get('enabled', True) else "OFF") + "）"
-                label_font = QFont()
-                label_font.setPointSize(10)
-                painter.setFont(label_font)
-                painter.setPen(QColor(0, 255, 255))
-                painter.drawText(preview_x, preview_y - 5, label)
-
         painter.end()
         self.base_pixmap = self.display_pixmap.copy()  # ベース画像を保存
         self.draw_magnifier()
+
+    def update_corners_only(self):
+        """コーナーマーカーのみを再描画（ドラッグ中の軽量更新用）"""
+        if not self.scaled_image_cache:
+            # キャッシュがない場合はフル更新
+            self.update_display()
+            return
+
+        # キャッシュからコピーして使用
+        self.display_pixmap = self.scaled_image_cache.copy()
+        self._draw_corners()
 
     def draw_magnifier(self):
         """拡大鏡を描画"""
@@ -1257,7 +1322,8 @@ class ImageCanvas(QLabel):
             self.corners[self.dragging_corner] = (new_x, new_y)
             # 拡大鏡もコーナー位置に追従させる
             self.mouse_pos = (new_x, new_y)
-            self.update_display()
+            # ドラッグ中は軽量更新（コーナーマーカーのみ再描画）
+            self.update_corners_only()
             self.draw_magnifier()
             self.coordinates_changed.emit()
         else:
@@ -1735,10 +1801,13 @@ class PerspectiveCorrectorApp(QMainWindow):
                 output_item = QTableWidgetItem(output_name)
                 self.file_table.setItem(row, 1, output_item)
 
-                # 設定済みの場合は右カラムの背景色を変更
-                if rel_path in self.config and "corners" in self.config[rel_path]:
-                    if len(self.config[rel_path]["corners"]) == 4:
-                        output_item.setBackground(QColor(144, 238, 144, 100))
+                # 4隅設定済みの場合は右カラムの背景色を変更
+                if rel_path in self.config:
+                    corners = self.config[rel_path].get("corners", [])
+                    if len(corners) == 4:
+                        output_item.setBackground(QColor(144, 238, 144, 100))  # 薄緑
+                    elif len(corners) > 0:
+                        output_item.setBackground(QColor(255, 200, 100, 100))  # 薄オレンジ（途中）
 
         self.file_table.blockSignals(False)
 
@@ -1957,11 +2026,11 @@ class PerspectiveCorrectorApp(QMainWindow):
 
     def on_color_correction_toggled(self, state):
         """色調補正トグルの切り替え"""
-        enabled = state == Qt.Checked
+        enabled = self.color_correction_toggle.isChecked()
         self.color_settings['enabled'] = enabled
         self.save_config()
         # キャンバスのプレビューを更新
-        self.canvas.set_color_settings(self.color_settings)
+        self.canvas.set_color_settings(self.color_settings.copy())
         status = "有効" if enabled else "無効"
         self.statusBar.showMessage(f"色調補正を{status}にしました")
 
@@ -1992,10 +2061,10 @@ class PerspectiveCorrectorApp(QMainWindow):
 
     def update_status(self):
         """ステータス表示を更新"""
-        # 座標が設定されているファイルのみカウント
+        # 座標が設定されているファイルのみカウント（4隅すべて設定済み）
         count = sum(
-            1 for data in self.config.values()
-            if "corners" in data and len(data.get("corners", [])) == 4
+            1 for rel_path, data in self.config.items()
+            if not rel_path.startswith('_') and len(data.get("corners", [])) == 4
         )
         self.file_count_label.setText(f"設定済み: {count} ファイル")
         self.process_btn.setEnabled(count > 0)
@@ -2008,11 +2077,15 @@ class PerspectiveCorrectorApp(QMainWindow):
 
     def run_batch_process(self):
         """一括処理実行"""
-        # 座標が設定されているファイルのみカウント
-        files_to_process = [
-            (rel_path, data) for rel_path, data in self.config.items()
-            if "corners" in data and len(data.get("corners", [])) == 4
-        ]
+        # 座標が設定されているファイルのみカウント（4隅すべて設定済み）
+        files_to_process = []
+        for rel_path, data in self.config.items():
+            # _で始まるキーは設定用なのでスキップ
+            if rel_path.startswith('_'):
+                continue
+            corners = data.get("corners", [])
+            if len(corners) == 4:
+                files_to_process.append((rel_path, data))
 
         if not files_to_process:
             self.show_message_box(QMessageBox.Warning, "警告", "処理するファイルがありません")
