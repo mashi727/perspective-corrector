@@ -16,7 +16,7 @@
 
 ## デモ
 
-https://github.com/mashi727/perspective-corrector/raw/main/perspective_corrector_Ver1.0.mp4
+<video src="https://github.com/mashi727/perspective-corrector/raw/main/perspective_corrector_Ver1.0.mp4" controls="controls" muted="muted" style="max-width:100%;"></video>
 
 ## インストール
 
