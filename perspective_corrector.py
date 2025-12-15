@@ -809,6 +809,10 @@ class ImageCanvas(QLabel):
         self.show_guide_message = False
         self.guide_message = ""
 
+        # 色調補正設定（プレビュー用）
+        self.color_settings = {}
+        self.preview_pixmap = None  # 補正プレビュー画像
+
         # 4隅の座標（表示座標系）
         self.corners = []  # [(x, y), ...]
         self.corner_labels = ["左上", "右上", "右下", "左下"]
@@ -871,6 +875,51 @@ class ImageCanvas(QLabel):
             oy = int((dy - self.offset_y) / self.scale)
             result.append((ox, oy))
         return result
+
+    def set_color_settings(self, settings: dict):
+        """色調補正設定を更新"""
+        self.color_settings = settings
+        self.preview_pixmap = None  # キャッシュをクリア
+        self.update_display()
+
+    def generate_preview(self):
+        """台形補正+色調補正のプレビュー画像を生成"""
+        if not self.original_pixmap or len(self.corners) != 4:
+            return None
+
+        # 元画像座標を取得
+        corners_orig = self.get_corners_original()
+
+        # 画像読み込みパス
+        load_path = self.temp_file if self.temp_file else self.image_path
+        if not load_path:
+            return None
+
+        # OpenCVで画像読み込み
+        img = cv2.imread(load_path)
+        if img is None:
+            return None
+
+        # プレビュー用にリサイズ（パフォーマンス向上）
+        preview_size = (640, 360)
+        src = np.float32(corners_orig)
+        w, h = preview_size
+        dst = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+
+        # 台形補正
+        matrix = cv2.getPerspectiveTransform(src, dst)
+        result = cv2.warpPerspective(img, matrix, preview_size)
+
+        # 色調補正
+        result = auto_color_correction(result, self.color_settings)
+
+        # QPixmapに変換
+        result_rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+        h, w, ch = result_rgb.shape
+        bytes_per_line = ch * w
+        from PySide6.QtGui import QImage
+        qimg = QImage(result_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        return QPixmap.fromImage(qimg.copy())
 
     def update_display(self):
         """表示を更新"""
@@ -970,6 +1019,39 @@ class ImageCanvas(QLabel):
             painter.setPen(QColor(255, 200, 0))
             painter.drawText(box_x + box_padding, box_y + box_padding + fm.ascent(),
                            self.guide_message)
+
+        # 4隅が設定されている場合、プレビューを右下に表示
+        if len(self.corners) == 4:
+            preview = self.generate_preview()
+            if preview:
+                # プレビューサイズを調整（キャンバスの1/4程度）
+                preview_max_w = self.width() // 3
+                preview_max_h = self.height() // 3
+                scaled_preview = preview.scaled(
+                    preview_max_w, preview_max_h,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+
+                # 右下に配置（マージン10px）
+                margin = 10
+                preview_x = self.width() - scaled_preview.width() - margin
+                preview_y = self.height() - scaled_preview.height() - margin
+
+                # 枠線付きで描画
+                painter.setPen(QPen(QColor(0, 255, 255), 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(preview_x - 2, preview_y - 2,
+                               scaled_preview.width() + 4, scaled_preview.height() + 4)
+                painter.drawPixmap(preview_x, preview_y, scaled_preview)
+
+                # ラベル
+                label = "プレビュー（色調補正: " + ("ON" if self.color_settings.get('enabled', True) else "OFF") + "）"
+                label_font = QFont()
+                label_font.setPointSize(10)
+                painter.setFont(label_font)
+                painter.setPen(QColor(0, 255, 255))
+                painter.drawText(preview_x, preview_y - 5, label)
 
         painter.end()
         self.base_pixmap = self.display_pixmap.copy()  # ベース画像を保存
@@ -1312,6 +1394,8 @@ class PerspectiveCorrectorApp(QMainWindow):
         self.load_config()
         self.setup_ui()
         self.update_window_title()
+        # キャンバスに色調補正設定を渡す
+        self.canvas.color_settings = self.color_settings
 
     def load_config(self):
         """設定ファイルを読み込み"""
@@ -1867,6 +1951,8 @@ class PerspectiveCorrectorApp(QMainWindow):
             self.color_correction_toggle.blockSignals(True)
             self.color_correction_toggle.setChecked(self.color_settings.get('enabled', True))
             self.color_correction_toggle.blockSignals(False)
+            # キャンバスのプレビューを更新
+            self.canvas.set_color_settings(self.color_settings)
             self.statusBar.showMessage("色調補正設定を保存しました")
 
     def on_color_correction_toggled(self, state):
@@ -1874,6 +1960,8 @@ class PerspectiveCorrectorApp(QMainWindow):
         enabled = state == Qt.Checked
         self.color_settings['enabled'] = enabled
         self.save_config()
+        # キャンバスのプレビューを更新
+        self.canvas.set_color_settings(self.color_settings)
         status = "有効" if enabled else "無効"
         self.statusBar.showMessage(f"色調補正を{status}にしました")
 
