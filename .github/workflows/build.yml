@@ -65,12 +65,7 @@ jobs:
 
       - name: Build app with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --name PerspectiveCorrector \
-            --hidden-import=PIL \
-            --hidden-import=PIL.Image \
-            --hidden-import=pillow_heif \
-            --collect-all pillow_heif \
-            perspective_corrector.py
+          pyinstaller perspective_corrector.spec --noconfirm
 
       - name: Create DMG
         run: |

@@ -1,7 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec file for perspective_corrector
 
+import sys
 from PyInstaller.utils.hooks import collect_all
+
+# プラットフォームに応じたアイコンファイルを選択
+if sys.platform == 'darwin':
+    app_icon = 'icon.icns'
+elif sys.platform == 'win32':
+    app_icon = 'icon.ico'
+else:
+    app_icon = None
 
 block_cipher = None
 
@@ -35,25 +44,77 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='PerspectiveCorrector',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,  # GUIアプリなのでコンソール非表示
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=None,  # アイコンを指定する場合: icon='app.ico'
-)
+# macOS: .appバンドル用にone-dirモードで作成
+# Windows: one-fileモードで.exeを作成
+if sys.platform == 'darwin':
+    # macOS用: one-dirモード（.appバンドル用）
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name='PerspectiveCorrector',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=app_icon,
+    )
+
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='PerspectiveCorrector',
+    )
+
+    app = BUNDLE(
+        coll,
+        name='PerspectiveCorrector.app',
+        icon=app_icon,
+        bundle_identifier='com.mashi.perspectivecorrector',
+        info_plist={
+            'CFBundleName': 'PerspectiveCorrector',
+            'CFBundleDisplayName': 'Perspective Corrector',
+            'CFBundleVersion': '1.1.0',
+            'CFBundleShortVersionString': '1.1.0',
+            'NSHighResolutionCapable': True,
+            'NSRequiresAquaSystemAppearance': False,
+        },
+    )
+else:
+    # Windows用: one-fileモード
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name='PerspectiveCorrector',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=app_icon,
+    )
