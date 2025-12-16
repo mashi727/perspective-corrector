@@ -5,6 +5,17 @@
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![PySide6](https://img.shields.io/badge/PySide6-Qt6-green.svg)
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.x-red.svg)
+[![Release](https://img.shields.io/github/v/release/mashi727/perspective-corrector)](https://github.com/mashi727/perspective-corrector/releases/latest)
+
+## ダウンロード
+
+### Windows版（インストール不要）
+
+**[PerspectiveCorrector.exe をダウンロード](https://github.com/mashi727/perspective-corrector/releases/latest/download/PerspectiveCorrector.exe)**
+
+ダウンロードしたEXEファイルをダブルクリックで起動できます。
+
+> 初回起動時はWindowsのSmartScreenが警告を表示する場合があります。「詳細情報」→「実行」で起動できます。
 
 ## 機能
 
