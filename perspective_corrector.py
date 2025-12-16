@@ -1,22 +1,52 @@
 #!/usr/bin/env python3
 """
-プレゼン写真 台形補正アプリケーション
+Perspective Corrector - プレゼン写真 台形補正アプリケーション
 
-機能:
-- 左側TreeViewでディレクトリ内の画像ファイルを選択
-- 右側で4隅をクリックして座標指定
-- 座標はJSONファイルに自動保存
-- 一括処理ボタンでOpenCVによる台形補正を実行
+概要:
+    プロジェクターで投影されたスライドを斜めから撮影した写真の
+    台形歪みを補正し、正面から見た状態に変換するツール。
+
+主な機能:
+    - 4隅座標の手動指定（クリック＆ドラッグ）
+    - Cannyエッジ検出による四角形の自動認識
+    - 拡大鏡による精密な座標調整
+    - 色調補正（ホワイトバランス + CLAHE）
+    - 一括処理（PNG個別出力 / PDF一括出力）
+    - HEIC/HEIF形式のサポート（iPhone写真対応）
+
+アーキテクチャ:
+    - ImageCanvas: 画像表示と座標選択を担当するカスタムQLabel
+    - FileListPanel: ファイル一覧と出力名編集を担当するパネル
+    - MainWindow: 全体のレイアウトと処理フローを管理
+    - ColorCorrectionSettingsDialog: 色調補正パラメータの調整ダイアログ
+
+設定ファイル:
+    - perspective_config.json: 作業ディレクトリに保存される座標情報
+    - ~/.perspective_corrector_recent.json: 最近使用したフォルダの履歴
+
+Author: mashi727
+License: MIT
 """
 
+# =============================================================================
+# 標準ライブラリ
+# =============================================================================
 import sys
 import json
 import subprocess
 import tempfile
 import platform
 from pathlib import Path
+
+# =============================================================================
+# サードパーティライブラリ
+# =============================================================================
 import cv2
 import numpy as np
+
+# =============================================================================
+# Qt (PySide6)
+# =============================================================================
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QGroupBox, QTableWidget, QTableWidgetItem,
@@ -25,18 +55,43 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QSlider, QFileDialog, QMenuBar, QMenu
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QMouseEvent, QBrush, QAction, QKeySequence
+from PySide6.QtGui import (
+    QPixmap, QPainter, QPen, QColor, QFont, QMouseEvent, QBrush,
+    QAction, QKeySequence
+)
 
 
-# HEIC対応: pillow-heifの初期化状態を追跡
+# =============================================================================
+# HEIC/HEIF サポート
+# =============================================================================
+# iPhoneで撮影した写真はHEIC形式で保存されることが多い。
+# OpenCVやQtは標準ではHEICを読めないため、JPEGに変換して処理する。
+# 変換方法は環境によって異なるため、複数のフォールバックを用意している。
+#
+# 優先順位:
+#   1. pillow-heif (クロスプラットフォーム、推奨)
+#   2. sips (macOS標準コマンド)
+#   3. ImageMagick (Windows、要インストール)
+# =============================================================================
+
 _heif_registered = False
 _heif_available = None  # None=未確認, True=利用可能, False=利用不可
 
 
-def _init_heif_support():
-    """pillow-heifの初期化（一度だけ実行）"""
+def _init_heif_support() -> bool:
+    """
+    pillow-heifの初期化（一度だけ実行）
+
+    Returns:
+        pillow-heifが利用可能な場合True
+
+    Note:
+        register_heif_opener()は一度だけ呼ぶ必要がある。
+        複数回呼ぶと警告が出るため、フラグで制御している。
+    """
     global _heif_registered, _heif_available
 
+    # 既に確認済みの場合はキャッシュを返す（毎回のインポート試行を避ける）
     if _heif_available is not None:
         return _heif_available
 
@@ -47,19 +102,33 @@ def _init_heif_support():
         _heif_available = True
         return True
     except Exception as e:
+        # ImportError以外にも、DLLが見つからない等の例外が発生しうる
         print(f"pillow-heif initialization failed: {e}")
         _heif_available = False
         return False
 
 
 def convert_heic_to_temp_jpeg(heic_path: str) -> str:
-    """HEICファイルを一時的なJPEGに変換"""
-    # pillow-heifが使える場合はそれを使用
+    """
+    HEICファイルを一時的なJPEGに変換
+
+    Args:
+        heic_path: 変換元のHEICファイルパス
+
+    Returns:
+        変換後の一時JPEGファイルパス。変換失敗時はNone。
+
+    Note:
+        一時ファイルは呼び出し元で削除する責任がある。
+        delete=Falseで作成しているため、明示的な削除が必要。
+    """
+    # 方法1: pillow-heif（クロスプラットフォーム、最も信頼性が高い）
     if _init_heif_support():
         try:
             from PIL import Image
             img = Image.open(heic_path)
-            # EXIF情報を保持してJPEGに変換
+            # EXIF情報（撮影日時、カメラ情報等）を保持してJPEGに変換
+            # これがないと、写真の向き情報などが失われる
             exif = img.info.get('exif', None)
             temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
             if exif:
@@ -70,11 +139,12 @@ def convert_heic_to_temp_jpeg(heic_path: str) -> str:
         except Exception as e:
             print(f"HEIC conversion with pillow-heif failed: {e}")
 
-    # macOSの場合はsipsコマンドを使用
+    # 方法2: sips（macOS専用の画像処理コマンド）
+    # macOSには標準でHEIC対応のsipsコマンドが含まれている
     if platform.system() == 'Darwin':
         temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
         temp_path = temp_file.name
-        temp_file.close()
+        temp_file.close()  # Windowsではファイルを閉じないと別プロセスからアクセスできない
         try:
             subprocess.run(
                 ['sips', '-s', 'format', 'jpeg', heic_path, '--out', temp_path],
@@ -84,13 +154,14 @@ def convert_heic_to_temp_jpeg(heic_path: str) -> str:
         except subprocess.CalledProcessError as e:
             print(f"HEIC conversion with sips failed: {e}")
 
-    # Windowsの場合: ImageMagickがあれば使用
+    # 方法3: ImageMagick（Windowsでpillow-heifが動かない場合のフォールバック）
     if platform.system() == 'Windows':
         temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
         temp_path = temp_file.name
         temp_file.close()
+
+        # ImageMagick 7.x は magick コマンド
         try:
-            # ImageMagickのmagickコマンドを試す
             subprocess.run(
                 ['magick', heic_path, '-quality', '95', temp_path],
                 check=True, capture_output=True
@@ -99,8 +170,8 @@ def convert_heic_to_temp_jpeg(heic_path: str) -> str:
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
 
+        # ImageMagick 6.x は convert コマンド（ただしWindowsのconvert.exeと競合注意）
         try:
-            # 古いImageMagickのconvertコマンドを試す
             subprocess.run(
                 ['convert', heic_path, '-quality', '95', temp_path],
                 check=True, capture_output=True
@@ -112,12 +183,25 @@ def convert_heic_to_temp_jpeg(heic_path: str) -> str:
     return None
 
 
+# =============================================================================
+# 画像処理関数
+# =============================================================================
+
+
 def auto_color_correction(img: np.ndarray, settings: dict = None) -> np.ndarray:
     """
     自動色調補正（ホワイトバランス + CLAHE）
 
+    プロジェクター投影写真でよくある問題:
+    - 照明の色かぶり（蛍光灯で青っぽい、白熱灯で黄色っぽい）
+    - コントラスト不足（暗い部屋で撮影すると全体的に白っぽくなる）
+
+    これらを自動補正するため、2段階の処理を行う:
+    1. Gray World ホワイトバランス: 色かぶりを除去
+    2. CLAHE: 局所的なコントラストを改善
+
     Args:
-        img: 入力画像（BGR形式）
+        img: 入力画像（BGR形式、OpenCVの標準フォーマット）
         settings: 色調補正パラメータ辞書
             - enabled: 色調補正の有効/無効 (デフォルト: True)
             - white_balance: ホワイトバランス補正の有効/無効 (デフォルト: True)
@@ -126,18 +210,22 @@ def auto_color_correction(img: np.ndarray, settings: dict = None) -> np.ndarray:
             - clahe_grid_size: CLAHEのtileGridSize (デフォルト: 8)
 
     Returns:
-        色調補正後の画像
+        色調補正後の画像（BGR形式）
     """
     if settings is None:
         settings = {}
 
-    # 色調補正が無効の場合はそのまま返す
     if not settings.get('enabled', True):
         return img
 
     result = img.copy()
 
-    # 1. ホワイトバランス補正（Gray World assumption）
+    # -------------------------------------------------------------------------
+    # ステップ1: ホワイトバランス補正（Gray World assumption）
+    # -------------------------------------------------------------------------
+    # 理論: 「自然なシーンでは、全ピクセルの平均色はグレーになるはず」
+    # 実装: 各チャンネル(B,G,R)の平均を計算し、全体の平均輝度に揃える
+    # 効果: 蛍光灯の青かぶりや白熱灯の黄かぶりを除去
     if settings.get('white_balance', True):
         result = result.astype(np.float32)
         avg_b = np.mean(result[:, :, 0])
@@ -145,6 +233,8 @@ def auto_color_correction(img: np.ndarray, settings: dict = None) -> np.ndarray:
         avg_r = np.mean(result[:, :, 2])
         avg_gray = (avg_b + avg_g + avg_r) / 3
 
+        # 各チャンネルを平均輝度に合わせてスケーリング
+        # ゼロ除算を防ぐためにチェック
         if avg_b > 0:
             result[:, :, 0] = result[:, :, 0] * (avg_gray / avg_b)
         if avg_g > 0:
@@ -152,14 +242,23 @@ def auto_color_correction(img: np.ndarray, settings: dict = None) -> np.ndarray:
         if avg_r > 0:
             result[:, :, 2] = result[:, :, 2] * (avg_gray / avg_r)
 
+        # 0-255の範囲にクリップして整数に戻す
         result = np.clip(result, 0, 255).astype(np.uint8)
 
-    # 2. CLAHE（Contrast Limited Adaptive Histogram Equalization）
+    # -------------------------------------------------------------------------
+    # ステップ2: CLAHE（Contrast Limited Adaptive Histogram Equalization）
+    # -------------------------------------------------------------------------
+    # 通常のヒストグラム平坦化は画像全体に適用するため、
+    # 局所的なコントラストが失われることがある。
+    # CLAHEは画像を小さなタイルに分割し、各タイルで個別に平坦化する。
+    # clip_limit: コントラスト増強の上限（高すぎるとノイズが増幅される）
+    # grid_size: タイルのサイズ（小さいほど局所的な補正が強くなる）
     if settings.get('clahe_enabled', True):
         clip_limit = settings.get('clahe_clip_limit', 2.0)
         grid_size = settings.get('clahe_grid_size', 8)
 
         # LAB色空間に変換してL（輝度）チャンネルのみに適用
+        # 理由: RGBで直接処理すると色相が変わってしまうため
         lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
 
@@ -176,40 +275,53 @@ def perspective_transform_cv(input_path: str, corners: list, output_path: str,
                               output_size: tuple = (1920, 1080),
                               color_settings: dict = None) -> bool:
     """
-    OpenCVによる台形補正
+    OpenCVによる台形補正（透視変換）
+
+    斜めから撮影した台形の画像を、正面から見た矩形に変換する。
+    数学的には、4点の対応関係から3x3の透視変換行列を求め、
+    その行列を使って画像全体を変換する。
 
     Args:
         input_path: 入力画像パス
-        corners: 4隅の座標 [(x,y), ...] 左上、右上、右下、左下の順
+        corners: 4隅の座標 [(x,y), ...] 左上→右上→右下→左下の順（時計回り）
         output_path: 出力画像パス
-        output_size: 出力サイズ (width, height)
+        output_size: 出力サイズ (width, height)、デフォルトはFullHD
         color_settings: 色調補正パラメータ辞書
 
     Returns:
-        成功時True
+        成功時True、失敗時False
+
+    Note:
+        cornersの順序が重要。左上から時計回りで指定しないと
+        結果が回転したり歪んだりする。
     """
     try:
         img = cv2.imread(input_path)
         if img is None:
             return False
 
-        # 入力座標（左上、右上、右下、左下）
+        # 入力座標（ユーザーが指定した4隅）
         src = np.float32(corners)
 
-        # 出力座標（矩形）
+        # 出力座標（補正後の矩形の4隅）
+        # 同じ順序（左上→右上→右下→左下）で対応付ける
         w, h = output_size
         dst = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
 
-        # 変換行列を計算
+        # 透視変換行列を計算
+        # 4点の対応から3x3の射影変換行列を求める
         matrix = cv2.getPerspectiveTransform(src, dst)
 
         # 台形補正を適用
+        # INTER_LINEAR（デフォルト）でリサンプリング
         result = cv2.warpPerspective(img, matrix, output_size)
 
-        # 自動色調補正を適用
+        # 色調補正を適用（プロジェクター写真の色かぶり等を補正）
         result = auto_color_correction(result, color_settings)
 
-        # 拡張子に応じて保存
+        # 出力形式に応じて保存
+        # PNG: 可逆圧縮（品質重視）、圧縮レベル3（0-9、低いほど高速）
+        # JPEG: 非可逆圧縮（ファイルサイズ重視）、品質95%
         output_path_str = str(output_path)
         if output_path_str.lower().endswith('.png'):
             cv2.imwrite(output_path_str, result, [cv2.IMWRITE_PNG_COMPRESSION, 3])
@@ -226,6 +338,13 @@ def auto_detect_corners(image_path: str, settings: dict = None) -> list:
     """
     画像からプレゼンテーション領域の4隅を自動検出
 
+    処理フロー:
+    1. 画像をリサイズ（高速化のため）
+    2. グレースケール変換 → ぼかし → Cannyエッジ検出
+    3. モルフォロジー処理でエッジを強化
+    4. 輪郭検出 → 4点の多角形を探す
+    5. 左上から時計回りの順序に並び替え
+
     Args:
         image_path: 画像ファイルパス
         settings: 検出パラメータ辞書
@@ -237,24 +356,32 @@ def auto_detect_corners(image_path: str, settings: dict = None) -> list:
 
     Returns:
         [(x, y), ...] 左上、右上、右下、左下の順。検出失敗時はNone
+
+    Note:
+        プロジェクター画面は通常、写真の中で最も大きな四角形なので、
+        面積が大きい順に輪郭をチェックしている。
     """
-    # デフォルト設定
     if settings is None:
         settings = {}
+
+    # パラメータ取得
     canny_low = settings.get('canny_low', 50)
     canny_high = settings.get('canny_high', 150)
     blur_size = settings.get('blur_size', 5)
     approx_epsilon = settings.get('approx_epsilon', 0.02)
     min_area_ratio = settings.get('min_area_ratio', 0.05)
 
-    # 画像読み込み
     img = cv2.imread(image_path)
     if img is None:
         return None
 
     orig_h, orig_w = img.shape[:2]
 
-    # 処理用にリサイズ（大きい画像の処理を高速化）
+    # -------------------------------------------------------------------------
+    # ステップ1: リサイズ（処理高速化のため）
+    # -------------------------------------------------------------------------
+    # 4000x3000のような高解像度画像をそのまま処理すると遅いため、
+    # 長辺を1000pxに縮小して処理し、最後に座標をスケールバックする
     max_dim = 1000
     scale = min(max_dim / orig_w, max_dim / orig_h, 1.0)
     if scale < 1.0:
@@ -263,53 +390,58 @@ def auto_detect_corners(image_path: str, settings: dict = None) -> list:
         img_resized = img
         scale = 1.0
 
-    # グレースケール変換
+    # -------------------------------------------------------------------------
+    # ステップ2: 前処理（グレースケール → ぼかし）
+    # -------------------------------------------------------------------------
     gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
 
-    # ノイズ除去（カーネルサイズは奇数である必要がある）
+    # ガウシアンブラーでノイズを除去（カーネルサイズは奇数でなければならない）
     blur_k = blur_size if blur_size % 2 == 1 else blur_size + 1
     blurred = cv2.GaussianBlur(gray, (blur_k, blur_k), 0)
 
-    # エッジ検出
+    # -------------------------------------------------------------------------
+    # ステップ3: エッジ検出（Canny）
+    # -------------------------------------------------------------------------
+    # canny_low/highは勾配の閾値。この範囲の勾配を持つピクセルがエッジとして検出される
     edges = cv2.Canny(blurred, canny_low, canny_high)
 
-    # モルフォロジー処理でエッジを強化
+    # モルフォロジー処理: 膨張→収縮で途切れたエッジを接続
+    # これによりプロジェクター画面の輪郭が閉じた四角形になりやすくなる
     kernel = np.ones((3, 3), np.uint8)
     edges = cv2.dilate(edges, kernel, iterations=1)
     edges = cv2.erode(edges, kernel, iterations=1)
 
-    # 輪郭検出
+    # -------------------------------------------------------------------------
+    # ステップ4: 輪郭検出と四角形の探索
+    # -------------------------------------------------------------------------
+    # RETR_EXTERNAL: 最も外側の輪郭のみ取得（入れ子の輪郭は無視）
+    # CHAIN_APPROX_SIMPLE: 直線部分の中間点を省略してメモリ節約
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
         return None
 
-    # 面積でソート（大きい順）
+    # 面積の大きい順にソート（プロジェクター画面は通常最大の四角形）
     contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-    # 四角形を探す
-    for contour in contours[:10]:  # 上位10個をチェック
-        # 輪郭の周囲長
+    # 上位10個の輪郭から四角形を探す
+    for contour in contours[:10]:
         peri = cv2.arcLength(contour, True)
-        # 輪郭を近似
+        # approxPolyDPで輪郭を多角形に近似
+        # epsilon（許容誤差）が大きいほど頂点数が減る
         approx = cv2.approxPolyDP(contour, approx_epsilon * peri, True)
 
-        # 4点の多角形で、十分な面積がある場合
+        # 4頂点の多角形で、画像面積の一定比率以上の場合
         if len(approx) == 4:
             area = cv2.contourArea(approx)
             img_area = img_resized.shape[0] * img_resized.shape[1]
 
-            # 指定比率以上の面積がある四角形
             if area > img_area * min_area_ratio:
-                # 4点を取得
                 pts = approx.reshape(4, 2)
-
-                # 4点を左上、右上、右下、左下の順に並び替え
                 ordered = order_corners(pts)
 
-                # 元のスケールに戻す
+                # 縮小した分をスケールバックして元の座標系に戻す
                 ordered = [(int(x / scale), int(y / scale)) for x, y in ordered]
-
                 return ordered
 
     return None
@@ -318,40 +450,72 @@ def auto_detect_corners(image_path: str, settings: dict = None) -> list:
 def order_corners(pts):
     """
     4点を左上、右上、右下、左下の順に並び替え
+
+    透視変換では点の対応関係が重要なため、
+    検出された4点を常に同じ順序に整列させる必要がある。
+
+    アルゴリズム:
+    - 左上: x+y が最小の点（左上隅に近い）
+    - 右下: x+y が最大の点（右下隅に近い）
+    - 右上: x-y が最小の点（右上隅に近い）
+    - 左下: x-y が最大の点（左下隅に近い）
+
+    Args:
+        pts: 4点のnumpy配列 shape=(4, 2)
+
+    Returns:
+        [(x, y), ...] 左上、右上、右下、左下の順
     """
-    # 重心を計算
+    # 重心を計算（角度ソート用、現在は使用していない）
     center = pts.mean(axis=0)
 
-    # 各点を角度でソート
+    # 角度でソート（デバッグ用に残している）
     angles = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
     sorted_indices = np.argsort(angles)
     sorted_pts = pts[sorted_indices]
 
-    # 左上から時計回りに並び替え
-    # 最も左上の点（x+yが最小）を見つける
+    # 最も左上の点を見つける（x+yが最小）
     sums = sorted_pts.sum(axis=1)
     top_left_idx = np.argmin(sums)
-
-    # 左上から始まるように回転
     ordered = np.roll(sorted_pts, -top_left_idx, axis=0)
 
-    # y座標が小さい2点が上、大きい2点が下
-    # x座標が小さい方が左
+    # 実際の並び替えはx+y、x-yの性質を使う
     rect = np.zeros((4, 2), dtype=np.float32)
-
     s = pts.sum(axis=1)
     diff = np.diff(pts, axis=1).flatten()
 
     rect[0] = pts[np.argmin(s)]      # 左上: x+yが最小
     rect[2] = pts[np.argmax(s)]      # 右下: x+yが最大
-    rect[1] = pts[np.argmin(diff)]   # 右上: x-yが最小
-    rect[3] = pts[np.argmax(diff)]   # 左下: x-yが最大
+    rect[1] = pts[np.argmin(diff)]   # 右上: x-yが最小（xが大きくyが小さい）
+    rect[3] = pts[np.argmax(diff)]   # 左下: x-yが最大（xが小さくyが大きい）
 
     return [(int(x), int(y)) for x, y in rect]
 
 
 class DetectionSettingsDialog(QDialog):
-    """自動認識パラメータ設定ダイアログ（ダイアログ内プレビュー）"""
+    """
+    自動認識パラメータ設定ダイアログ
+
+    プレゼンテーション画面の4隅を自動検出するためのパラメータを調整する。
+    ダイアログ内でリアルタイムプレビューを表示し、パラメータ変更の効果を
+    即座に確認できる。
+
+    主なパラメータ:
+        - Canny閾値: エッジ検出の感度を調整。低いほど多くのエッジを検出
+        - ブラーサイズ: ノイズ除去の強度。大きいほどノイズに強いが、
+          細かいエッジも消えてしまう
+        - 輪郭近似精度: 検出した輪郭を多角形に近似する際の許容誤差
+        - 最小面積比率: 小さすぎる四角形を除外するための閾値
+
+    使用シーン:
+        - デフォルトパラメータで検出に失敗する場合
+        - 照明条件や背景が特殊な写真を処理する場合
+        - より精密な検出が必要な場合
+
+    Note:
+        OKボタンを押すと、検出結果がメインキャンバスに自動適用される。
+        キャンセルするとパラメータ変更は破棄される。
+    """
 
     def __init__(self, parent=None, settings=None, image_path=None):
         super().__init__(parent)
@@ -596,7 +760,29 @@ class DetectionSettingsDialog(QDialog):
 
 
 class ColorCorrectionSettingsDialog(QDialog):
-    """色調補正パラメータ設定ダイアログ（プレビュー付き）"""
+    """
+    色調補正パラメータ設定ダイアログ
+
+    プロジェクター投影写真の色かぶりやコントラスト不足を補正するための
+    パラメータを調整する。補正前/補正後のプレビューを並べて表示し、
+    効果を視覚的に確認できる。
+
+    補正処理:
+        1. ホワイトバランス（Gray World）: 照明による色かぶりを除去
+           - 蛍光灯の青っぽさや白熱灯の黄色っぽさを補正
+        2. CLAHE: 局所的なコントラストを改善
+           - 暗い部屋で撮影した写真のメリハリを強調
+
+    パラメータ:
+        - ホワイトバランス: ON/OFF
+        - CLAHE有効化: ON/OFF
+        - コントラスト制限 (clip_limit): 大きいほど効果が強い
+        - グリッドサイズ: 小さいほど局所的な補正が強くなる
+
+    Note:
+        プレビューには台形補正も適用された状態で表示される。
+        これは最終出力に近い状態を確認できるようにするため。
+    """
 
     def __init__(self, parent=None, settings=None, image_path=None, corners=None):
         super().__init__(parent)
@@ -810,7 +996,37 @@ class ColorCorrectionSettingsDialog(QDialog):
 
 
 class ImageCanvas(QLabel):
-    """画像表示と4隅座標選択用のキャンバス"""
+    """
+    画像表示と4隅座標選択用のカスタムキャンバス
+
+    QLabel を継承し、以下の機能を提供:
+        - 画像の表示とスケーリング（ウィジェットサイズに自動フィット）
+        - 4隅座標のクリック指定とドラッグ調整
+        - 拡大鏡表示（精密な座標調整のため）
+        - 色調補正のプレビュー表示
+
+    座標系:
+        - 表示座標系: ウィジェット上のピクセル座標（スケーリング後）
+        - 元画像座標系: 元画像のピクセル座標（実際の処理に使用）
+        座標変換には scale と offset を使用する。
+
+    拡大鏡の動作:
+        - マウス位置周辺を拡大して画面中央に表示
+        - 象限に応じたオフセット表示で、マウス位置が見やすくなるよう調整
+        - 4隅設定済みの場合は選択領域をマゼンタでオーバーレイ
+
+    ドラッグ操作:
+        - 既存のコーナーをドラッグで移動可能
+        - 精密モード（drag_precision）でマウス移動量を減衰させ、細かい調整が可能
+
+    パフォーマンス最適化:
+        - 色調補正済み画像をキャッシュして再計算を回避
+        - ドラッグ中はコーナーマーカーのみ再描画（背景は再計算しない）
+        - 画像切り替え時は遅延色調補正（即座にオリジナルを表示、50ms後に補正適用）
+
+    Signals:
+        coordinates_changed: 座標が変更された時に発火
+    """
 
     coordinates_changed = Signal()
 
@@ -819,50 +1035,80 @@ class ImageCanvas(QLabel):
         self.setMinimumSize(800, 600)
         self.setAlignment(Qt.AlignCenter)
         self.setStyleSheet("background-color: #2d2d2d; border: 1px solid #555;")
-        self.setMouseTracking(True)  # マウス移動を追跡
+        self.setMouseTracking(True)  # マウス移動を追跡（拡大鏡表示のため）
         self.setCursor(Qt.CrossCursor)  # 精密選択用クロスヘアカーソル
         self.setAttribute(Qt.WA_Hover, True)  # ホバーイベントを有効化
 
-        self.original_pixmap = None
-        self.display_pixmap = None
-        self.base_pixmap = None  # 拡大鏡なしのベース画像
+        # ---------------------------------------------------------------------
+        # 画像表示関連
+        # ---------------------------------------------------------------------
+        self.original_pixmap = None   # 元画像（フルサイズ）
+        self.display_pixmap = None    # 表示用画像（スケール済み、コーナー描画後）
+        self.base_pixmap = None       # 拡大鏡を描画する前のベース画像
+
+        # 座標変換用: 表示座標 = 元座標 * scale + offset
+        # ウィジェットサイズに合わせて動的に計算される
         self.scale = 1.0
-        self.offset_x = 0
-        self.offset_y = 0
+        self.offset_x = 0  # 画像を中央配置するための水平オフセット
+        self.offset_y = 0  # 画像を中央配置するための垂直オフセット
+
         self.image_path = None
-        self.temp_file = None  # HEIC変換用一時ファイル
+        self.temp_file = None  # HEIC変換時の一時ファイル（終了時に削除）
         self.original_size = (0, 0)
 
+        # ---------------------------------------------------------------------
         # 拡大鏡設定
-        self.magnifier_base_size = 400  # 拡大鏡の基準サイズ（長辺）
-        self.magnifier_zoom = 1.75  # 拡大率
-        self.mouse_pos = None  # 現在のマウス位置
+        # 精密な座標指定を可能にするため、マウス位置周辺を拡大表示する
+        # ---------------------------------------------------------------------
+        self.magnifier_base_size = 400  # 拡大鏡の基準サイズ（長辺、ピクセル）
+        self.magnifier_zoom = 1.75      # 拡大率（1.75倍で見やすいバランス）
+        self.mouse_pos = None           # 現在のマウス位置（拡大鏡の中心）
 
+        # ---------------------------------------------------------------------
         # ドラッグ操作用
-        self.dragging_corner = None  # ドラッグ中のコーナーインデックス
-        self.drag_threshold = 15  # ドラッグ判定の距離（ピクセル）
-        self.drag_start_mouse = None  # ドラッグ開始時のマウス位置
-        self.drag_start_corner = None  # ドラッグ開始時のコーナー位置
-        self.drag_precision = 0.15  # 精密モードの減衰率（小さいほど精密）
+        # コーナーをドラッグで微調整できるようにする
+        # 精密モード: マウス移動量を減衰させ、細かい調整を可能にする
+        # ---------------------------------------------------------------------
+        self.dragging_corner = None     # ドラッグ中のコーナーインデックス (0-3)
+        self.drag_threshold = 15        # ドラッグ判定の距離（この範囲内のクリックでドラッグ開始）
+        self.drag_start_mouse = None    # ドラッグ開始時のマウス位置
+        self.drag_start_corner = None   # ドラッグ開始時のコーナー位置
+        # 精密モードの減衰率: マウスを100px動かしても、コーナーは15px（0.15倍）しか動かない
+        # これにより、高解像度画像でも1ピクセル単位の調整が可能になる
+        self.drag_precision = 0.15
 
-        # ガイドメッセージ表示
+        # ---------------------------------------------------------------------
+        # ガイドメッセージ（自動検出失敗時など）
+        # ---------------------------------------------------------------------
         self.show_guide_message = False
         self.guide_message = ""
 
-        # 色調補正設定（プレビュー用）
+        # ---------------------------------------------------------------------
+        # 色調補正関連
+        # パフォーマンス向上のため、色調補正結果をキャッシュする
+        # ---------------------------------------------------------------------
         self.color_settings = {}
-        self.preview_pixmap = None  # 補正プレビュー画像
-        self.color_corrected_pixmap = None  # 色調補正済み画像キャッシュ
-        self.color_correction_cache_valid = False  # キャッシュ有効フラグ
-        self.scaled_image_cache = None  # スケーリング済み画像キャッシュ（コーナーなし）
-        self.color_correction_pending = False  # 色調補正待ち状態
+        self.preview_pixmap = None              # 台形補正+色調補正のプレビュー
+        self.color_corrected_pixmap = None      # 色調補正済み画像（キャッシュ）
+        self.color_correction_cache_valid = False  # キャッシュが有効かどうか
+        self.scaled_image_cache = None          # スケール済み背景画像（ドラッグ中の高速描画用）
+
+        # 遅延色調補正: 画像切り替え時、まずオリジナルを表示し、
+        # 50ms後に色調補正を適用する。これにより体感的なレスポンスが向上する
+        self.color_correction_pending = False
         self.color_correction_timer = QTimer()
         self.color_correction_timer.setSingleShot(True)
         self.color_correction_timer.timeout.connect(self._apply_deferred_color_correction)
 
+        # ---------------------------------------------------------------------
         # 4隅の座標（表示座標系）
+        # 左上→右上→右下→左下の順で格納（時計回り）
+        # この順序は透視変換の入力として使用される
+        # ---------------------------------------------------------------------
         self.corners = []  # [(x, y), ...]
         self.corner_labels = ["左上", "右上", "右下", "左下"]
+        # 各コーナーを視覚的に区別するための色
+        # 左上=赤、右上=緑、右下=青、左下=黄
         self.corner_colors = [
             QColor(255, 0, 0),      # 赤
             QColor(0, 255, 0),      # 緑
@@ -1212,7 +1458,21 @@ class ImageCanvas(QLabel):
         self._draw_corners()
 
     def draw_magnifier(self):
-        """拡大鏡を描画"""
+        """
+        拡大鏡を描画
+
+        拡大鏡は画面中央に固定表示され、マウス位置周辺を拡大して表示する。
+        これにより、ユーザーは画像の細部を確認しながら精密な座標指定ができる。
+
+        設計上の工夫:
+            1. 象限オフセット: マウス位置が拡大鏡の中心ではなく、
+               マウスが画面のどの象限にあるかに応じて少しずらして表示する。
+               これにより、マウス位置の周囲（次にクリックしそうな場所）が
+               より多く見えるようになる。
+            2. 境界処理: 画像の端でも拡大鏡が正しく表示されるよう、
+               表示範囲が画像外にはみ出る場合はクリッピングする。
+            3. クロスヘア: 現在のマウス位置を赤い十字線で示す。
+        """
         if not self.base_pixmap or not self.mouse_pos or not self.original_pixmap:
             if self.base_pixmap:
                 self.setPixmap(self.base_pixmap)
@@ -1220,7 +1480,7 @@ class ImageCanvas(QLabel):
 
         mx, my = self.mouse_pos
 
-        # 画像範囲内かチェック
+        # 画像範囲内かチェック（画像外ではベース画像をそのまま表示）
         img_w = self.original_pixmap.width() * self.scale
         img_h = self.original_pixmap.height() * self.scale
 
@@ -1229,64 +1489,75 @@ class ImageCanvas(QLabel):
             self.setPixmap(self.base_pixmap)
             return
 
-        # 拡大鏡用のピクスマップを作成
+        # 拡大鏡用のピクスマップを作成（ベース画像のコピーに描画）
         result = self.base_pixmap.copy()
         painter = QPainter(result)
 
-        # 元画像での座標を計算（コーナーの実際の位置）
+        # 表示座標系から元画像座標系への変換
         corner_orig_x = (mx - self.offset_x) / self.scale
         corner_orig_y = (my - self.offset_y) / self.scale
 
-        # 画像の縦横比を計算して拡大鏡サイズを決定
+        # -------------------------------------------------------------------------
+        # 拡大鏡のサイズ決定
+        # 画像のアスペクト比を維持した拡大鏡にする
+        # これにより、画像と同じ形状の領域が表示され、違和感がない
+        # -------------------------------------------------------------------------
         orig_w = self.original_pixmap.width()
         orig_h = self.original_pixmap.height()
         aspect_ratio = orig_w / orig_h
 
-        if aspect_ratio >= 1:  # 横長
+        if aspect_ratio >= 1:  # 横長画像
             mag_width = self.magnifier_base_size
             mag_height = int(self.magnifier_base_size / aspect_ratio)
-        else:  # 縦長
+        else:  # 縦長画像
             mag_height = self.magnifier_base_size
             mag_width = int(self.magnifier_base_size * aspect_ratio)
 
-        # 拡大する領域のサイズ（元画像座標系）
+        # 拡大前の表示領域サイズ（元画像座標系）
         src_width = mag_width / self.magnifier_zoom
         src_height = mag_height / self.magnifier_zoom
 
-        # マウス位置が画像のどの象限にあるかでオフセットを決定
-        # 画像の中心を基準に4分割
+        # -------------------------------------------------------------------------
+        # 象限オフセット計算
+        # なぜオフセットが必要か？
+        # マウスを画像の左上隅に置くとき、ユーザーは左上隅の周辺を見たい。
+        # もし拡大鏡がマウス位置を中心に表示すると、左上隅より左・上は
+        # 画像外なので表示できない。そこで、マウス位置を少し端に寄せて表示し、
+        # 画像内の有効な領域をより多く見えるようにする。
+        # -------------------------------------------------------------------------
         image_center_x = orig_w / 2
         image_center_y = orig_h / 2
 
-        # マウスが左半分か右半分か、上半分か下半分かを判定
         is_left = corner_orig_x < image_center_x
         is_top = corner_orig_y < image_center_y
 
-        # 象限に応じたオフセット（マウス位置の反対側を多く表示）
-        # 左上象限: 右下にオフセット → マウス位置が左上に表示
-        # 右上象限: 左下にオフセット → マウス位置が右上に表示
-        # 右下象限: 左上にオフセット → マウス位置が右下に表示
-        # 左下象限: 右上にオフセット → マウス位置が左下に表示
+        # オフセット量は表示領域の25%
+        # 左側にいる場合は右方向にオフセット（マウス位置が左側に表示される）
+        # 上側にいる場合は下方向にオフセット（マウス位置が上側に表示される）
         offset_ratio = 0.25
         view_offset_x = src_width * offset_ratio if is_left else -src_width * offset_ratio
         view_offset_y = src_height * offset_ratio if is_top else -src_height * offset_ratio
 
-        # ビューの中心位置（オフセット適用）
+        # 表示領域の中心（オフセット適用後）
         view_center_x = corner_orig_x + view_offset_x
         view_center_y = corner_orig_y + view_offset_y
         src_x = view_center_x - src_width / 2
         src_y = view_center_y - src_height / 2
 
-        # 元画像から切り出し（境界処理）
+        # -------------------------------------------------------------------------
+        # 境界クリッピング処理
+        # 表示領域が画像外にはみ出る場合、はみ出た分を切り詰める
+        # clip_offset_x/y: 切り詰めた分を記録（クロスヘア位置計算に使用）
+        # -------------------------------------------------------------------------
         src_rect_x = int(src_x)
         src_rect_y = int(src_y)
         src_rect_w = int(src_width)
         src_rect_h = int(src_height)
 
-        # クリッピングによるオフセットを記録
         clip_offset_x = 0
         clip_offset_y = 0
 
+        # 左端・上端のクリッピング
         if src_rect_x < 0:
             clip_offset_x = -src_rect_x
             src_rect_w += src_rect_x
@@ -1295,6 +1566,7 @@ class ImageCanvas(QLabel):
             clip_offset_y = -src_rect_y
             src_rect_h += src_rect_y
             src_rect_y = 0
+        # 右端・下端のクリッピング
         if src_rect_x + src_rect_w > orig_w:
             src_rect_w = orig_w - src_rect_x
         if src_rect_y + src_rect_h > orig_h:
@@ -1528,7 +1800,38 @@ class ImageCanvas(QLabel):
 
 
 class PerspectiveCorrectorApp(QMainWindow):
-    """メインアプリケーション"""
+    """
+    台形補正ツールのメインウィンドウ
+
+    アプリケーション全体の制御と、各コンポーネント間の連携を担当する。
+
+    主な責務:
+        - UI全体のレイアウト管理
+        - ファイル一覧の表示と選択処理
+        - 設定ファイル（JSON）の読み書き
+        - 一括処理（PNG/PDF出力）の実行
+        - メニューバーとショートカットの管理
+
+    設定ファイル:
+        - perspective_config.json: 作業ディレクトリに保存
+          - 各画像の4隅座標
+          - 出力ファイル名
+          - 自動認識パラメータ
+          - 色調補正パラメータ
+        - ~/.perspective_corrector_recent.json: ホームディレクトリに保存
+          - 最近使用したフォルダの履歴（最大10件）
+
+    ワークフロー:
+        1. フォルダを開く（メニューまたはドラッグ&ドロップ）
+        2. ファイル一覧から画像を選択
+        3. 自動検出または手動で4隅を指定
+        4. 必要に応じて座標を微調整
+        5. 一括処理でPNG/PDF出力
+
+    Note:
+        画像を切り替えると現在の座標が自動保存される。
+        アプリ終了時も自動保存される。
+    """
 
     CONFIG_FILE = "perspective_config.json"
 
@@ -2312,11 +2615,28 @@ class PerspectiveCorrectorApp(QMainWindow):
             self.show_message_box(QMessageBox.Warning, "エラー", msg)
 
     def run_batch_process_pdf(self, files_to_process):
-        """PDF出力の一括処理"""
+        """
+        PDF出力の一括処理
+
+        複数の台形補正済み画像を1つのPDFファイルにまとめて出力する。
+        プレゼンテーション資料の印刷やアーカイブに便利。
+
+        PDF仕様:
+            - 用紙サイズ: A4横（297mm × 210mm）
+            - 画像配置: アスペクト比を維持して最大サイズで中央配置
+            - 背景: 白
+            - 解像度: 72dpi（PDF標準）
+
+        処理フロー:
+            1. 各画像に台形補正＋色調補正を適用（一時ファイルに保存）
+            2. A4横サイズの白背景に画像を中央配置
+            3. 全ページをPillowでPDFとして保存
+            4. 一時ファイルを削除
+        """
         from PIL import Image
         import io
 
-        # デフォルトファイル名をフォルダ名から生成
+        # デフォルトファイル名をフォルダ名から生成（直感的な命名）
         default_name = Path(self.start_dir).name + ".pdf"
         dialog = QFileDialog(self, "PDFを保存", str(Path(self.start_dir) / default_name))
         dialog.setAcceptMode(QFileDialog.AcceptSave)
@@ -2337,14 +2657,19 @@ class PerspectiveCorrectorApp(QMainWindow):
         progress.setFixedSize(400, 100)
         self.center_dialog(progress, 400, 100)
 
-        # A4横サイズ (ポイント単位: 1pt = 1/72 inch)
-        # A4: 210mm x 297mm, 横向き: 297mm x 210mm
-        A4_WIDTH_PT = 841.89  # 297mm
-        A4_HEIGHT_PT = 595.28  # 210mm
+        # -------------------------------------------------------------------------
+        # A4横サイズの定義
+        # PDFの座標単位はポイント（pt）: 1pt = 1/72インチ ≈ 0.353mm
+        # A4用紙は国際規格ISO 216で 210mm × 297mm と定義されている
+        # 横向き（landscape）では 297mm × 210mm になる
+        # ポイントへの変換: 297mm × (72/25.4) ≈ 841.89pt
+        # -------------------------------------------------------------------------
+        A4_WIDTH_PT = 841.89   # 297mm（横方向）
+        A4_HEIGHT_PT = 595.28  # 210mm（縦方向）
 
-        corrected_images = []
-        error_files = []
-        temp_files = []
+        corrected_images = []  # PDFに含める画像リスト
+        error_files = []       # エラーが発生したファイルのリスト
+        temp_files = []        # 後で削除する一時ファイルのリスト
 
         for i, (rel_path, data) in enumerate(files_to_process):
             if progress.wasCanceled():
@@ -2384,17 +2709,23 @@ class PerspectiveCorrectorApp(QMainWindow):
             try:
                 if perspective_transform_cv(input_path, corners, temp_output.name,
                                            color_settings=self.color_settings):
-                    # PILで読み込んでA4横にフィット
+                    # 台形補正済み画像をPILで読み込み
                     img = Image.open(temp_output.name)
-                    img = img.convert('RGB')
+                    img = img.convert('RGB')  # PDFはRGBモードが必要
 
-                    # A4横に収まるようにリサイズ（アスペクト比維持）
+                    # -----------------------------------------------------------------
+                    # A4横にフィットするようにリサイズ（アスペクト比維持）
+                    # 画像が用紙より大きい場合は縮小、小さい場合はそのまま
+                    # 幅・高さそれぞれの縮小率を計算し、小さい方を採用することで
+                    # 画像が用紙からはみ出ないようにする
+                    # -----------------------------------------------------------------
                     img_width, img_height = img.size
                     scale = min(A4_WIDTH_PT / img_width, A4_HEIGHT_PT / img_height)
                     new_width = int(img_width * scale)
                     new_height = int(img_height * scale)
 
-                    # A4横サイズの白背景に中央配置
+                    # A4横サイズの白背景を作成し、リサイズした画像を中央に配置
+                    # 余白は白で埋められる（印刷時に自然に見える）
                     a4_img = Image.new('RGB', (int(A4_WIDTH_PT), int(A4_HEIGHT_PT)), 'white')
                     resized = img.resize((new_width, new_height), Image.LANCZOS)
                     x = (int(A4_WIDTH_PT) - new_width) // 2
@@ -2407,18 +2738,23 @@ class PerspectiveCorrectorApp(QMainWindow):
             except Exception as e:
                 error_files.append((rel_path, str(e)))
 
+        # -------------------------------------------------------------------------
         # PDF保存
+        # Pillowのsave_all=Trueを使用してマルチページPDFを生成
+        # 最初の画像のsaveメソッドを呼び、残りをappend_imagesで追加する
+        # -------------------------------------------------------------------------
         if corrected_images and not progress.wasCanceled():
             progress.setLabelText("PDFを保存中...")
             progress.setValue(len(files_to_process))
             QApplication.processEvents()
 
             try:
+                # Pillowのマルチページ出力: 最初の画像に残りを追加
                 corrected_images[0].save(
                     pdf_path,
                     save_all=True,
                     append_images=corrected_images[1:] if len(corrected_images) > 1 else [],
-                    resolution=72.0
+                    resolution=72.0  # PDF標準解像度
                 )
             except Exception as e:
                 error_files.append(("PDF保存", str(e)))
