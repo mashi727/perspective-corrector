@@ -269,12 +269,30 @@ PySide6 (Qt) + OpenCVで構築。
   - BUILD_WINDOWS.mdにHEICトラブルシューティングガイド追加
   - デバッグ用コンソール付きビルド方法を記載
 
+### Phase 15: GitHub Actions CI/CD
+
+- **Windows EXE自動ビルド**
+  - `.github/workflows/build-windows.yml`追加
+  - タグプッシュ時（`v*`）に自動ビルド
+  - 手動実行（workflow_dispatch）もサポート
+- **ビルド環境**
+  - Windows Server (windows-latest)
+  - Python 3.11
+  - PyInstallerによるEXE生成
+- **アーティファクト管理**
+  - ビルドしたEXEを30日間保持
+  - タグ時はGitHub Releaseを自動作成
+  - リリースにEXEファイルを添付
+
 ---
 
 ## ファイル構成
 
 ```
 perspective-corrector/
+├── .github/
+│   └── workflows/
+│       └── build-windows.yml   # GitHub Actions設定
 ├── perspective_corrector.py    # メインアプリケーション
 ├── pyproject.toml              # パッケージ設定
 ├── perspective_corrector.spec  # PyInstallerビルド設定
