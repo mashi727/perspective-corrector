@@ -34,9 +34,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller PySide6 opencv-python numpy pillow pillow-heif
 
+      - name: Verify icon files
+        run: |
+          echo "Checking icon files..."
+          ls -la icon.*
+          if [ -f "icon.ico" ]; then echo "✓ icon.ico found"; else echo "✗ icon.ico NOT found"; exit 1; fi
+
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller perspective_corrector.spec
+          pyinstaller perspective_corrector.spec --noconfirm
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -63,9 +69,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller PySide6 opencv-python numpy pillow pillow-heif
 
+      - name: Verify icon files
+        run: |
+          echo "Checking icon files..."
+          ls -la icon.*
+          if [ -f "icon.icns" ]; then echo "✓ icon.icns found"; else echo "✗ icon.icns NOT found"; exit 1; fi
+
       - name: Build app with PyInstaller
         run: |
           pyinstaller perspective_corrector.spec --noconfirm
+
+      - name: Verify icon in app bundle
+        run: |
+          echo "Checking icon in app bundle..."
+          ls -la dist/PerspectiveCorrector.app/Contents/Resources/*.icns || echo "No icns in Resources"
+          cat dist/PerspectiveCorrector.app/Contents/Info.plist | grep -A1 CFBundleIconFile || echo "No icon reference in Info.plist"
 
       - name: Create DMG
         run: |

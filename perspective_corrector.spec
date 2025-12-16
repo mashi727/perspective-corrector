@@ -2,15 +2,26 @@
 # PyInstaller spec file for perspective_corrector
 
 import sys
+import os
 from PyInstaller.utils.hooks import collect_all
+
+# specファイルのディレクトリを基準にアイコンパスを設定
+SPEC_DIR = os.path.dirname(os.path.abspath(SPEC))
 
 # プラットフォームに応じたアイコンファイルを選択
 if sys.platform == 'darwin':
-    app_icon = 'icon.icns'
+    app_icon = os.path.join(SPEC_DIR, 'icon.icns')
 elif sys.platform == 'win32':
-    app_icon = 'icon.ico'
+    app_icon = os.path.join(SPEC_DIR, 'icon.ico')
 else:
     app_icon = None
+
+# アイコンファイルの存在確認
+if app_icon and not os.path.exists(app_icon):
+    print(f"WARNING: Icon file not found: {app_icon}")
+    app_icon = None
+else:
+    print(f"Using icon: {app_icon}")
 
 block_cipher = None
 
