@@ -35,12 +35,14 @@ jobs:
           pip install pyinstaller PySide6 opencv-python numpy pillow pillow-heif
 
       - name: Verify icon files
+        shell: bash
         run: |
           echo "Checking icon files..."
           ls -la icon.*
           if [ -f "icon.ico" ]; then echo "✓ icon.ico found"; else echo "✗ icon.ico NOT found"; exit 1; fi
 
       - name: Build EXE with PyInstaller
+        shell: bash
         run: |
           pyinstaller perspective_corrector.spec --noconfirm
 
