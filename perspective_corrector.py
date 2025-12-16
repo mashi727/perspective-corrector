@@ -1845,7 +1845,15 @@ class PerspectiveCorrectorApp(QMainWindow):
 
     def __init__(self, start_dir: str = None):
         super().__init__()
-        self.setMinimumSize(1500, 800)
+        # ウィンドウサイズを固定（OSのタイリングやリサイズを無効化）
+        self.setFixedSize(1500, 800)
+        # macOSのフルスクリーン/タイリングを無効化（最大化ボタンを削除）
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowTitleHint |
+            Qt.WindowType.WindowCloseButtonHint |
+            Qt.WindowType.WindowMinimizeButtonHint
+        )
 
         self.start_dir = start_dir or str(Path.cwd())
         self.current_image = None
