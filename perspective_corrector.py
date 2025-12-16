@@ -855,6 +855,10 @@ class ImageCanvas(QLabel):
         self.color_corrected_pixmap = None  # 色調補正済み画像キャッシュ
         self.color_correction_cache_valid = False  # キャッシュ有効フラグ
         self.scaled_image_cache = None  # スケーリング済み画像キャッシュ（コーナーなし）
+        self.color_correction_pending = False  # 色調補正待ち状態
+        self.color_correction_timer = QTimer()
+        self.color_correction_timer.setSingleShot(True)
+        self.color_correction_timer.timeout.connect(self._apply_deferred_color_correction)
 
         # 4隅の座標（表示座標系）
         self.corners = []  # [(x, y), ...]
@@ -899,7 +903,15 @@ class ImageCanvas(QLabel):
         self.color_correction_cache_valid = False  # キャッシュを無効化
         self.color_corrected_pixmap = None
         self.scaled_image_cache = None  # スケーリングキャッシュも無効化
+
+        # 最初はオリジナル画像を即座に表示（色調補正なし）
+        self.color_correction_pending = True
         self.update_display()
+
+        # 色調補正は遅延実行（50ms後）
+        if self.color_settings.get('enabled', True):
+            self.color_correction_timer.start(50)
+
         return True
 
     def set_corners(self, corners_orig: list):
@@ -1014,19 +1026,28 @@ class ImageCanvas(QLabel):
             # 色調補正OFFの場合はオリジナル画像
             return self.original_pixmap
 
+        # 遅延処理待ちの場合はオリジナル画像を返す（高速化）
+        if self.color_correction_pending:
+            return self.original_pixmap
+
         # キャッシュが有効な場合はキャッシュを返す
         if self.color_correction_cache_valid and self.color_corrected_pixmap:
             return self.color_corrected_pixmap
 
-        # 色調補正ONの場合は補正を適用
+        # 色調補正を計算
+        self._compute_color_correction()
+        return self.color_corrected_pixmap if self.color_corrected_pixmap else self.original_pixmap
+
+    def _compute_color_correction(self):
+        """色調補正を計算してキャッシュに保存"""
         load_path = self.temp_file if self.temp_file else self.image_path
         if not load_path:
-            return self.original_pixmap
+            return
 
         # OpenCVで画像読み込み
         img = cv2.imread(load_path)
         if img is None:
-            return self.original_pixmap
+            return
 
         # 色調補正を適用
         result = auto_color_correction(img, self.color_settings)
@@ -1039,7 +1060,22 @@ class ImageCanvas(QLabel):
         qimg = QImage(result_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
         self.color_corrected_pixmap = QPixmap.fromImage(qimg.copy())
         self.color_correction_cache_valid = True
-        return self.color_corrected_pixmap
+
+    def _apply_deferred_color_correction(self):
+        """遅延色調補正を適用"""
+        if not self.original_pixmap or not self.color_settings.get('enabled', True):
+            self.color_correction_pending = False
+            return
+
+        # 色調補正を計算
+        self._compute_color_correction()
+        self.color_correction_pending = False
+
+        # キャッシュをクリアして再描画
+        self.scaled_image_cache = None
+        self.update_display()
+        self._draw_corners()
+        self.update()
 
     def update_display(self):
         """表示を更新"""
