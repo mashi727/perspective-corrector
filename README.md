@@ -33,7 +33,7 @@
 
 ## デモ
 
-https://github.com/user-attachments/assets/ca2963dc-b7ba-4e17-aa18-5a1c793dcb91
+https://github.com/user-attachments/assets/fc22470a-5e27-4404-bf19-a1fdc936953e
 
 ## インストール
 
