@@ -283,6 +283,12 @@ PySide6 (Qt) + OpenCVで構築。
   - ビルドしたEXEを30日間保持
   - タグ時はGitHub Releaseを自動作成
   - リリースにEXEファイルを添付
+- **権限設定**
+  - `permissions: contents: write`でリリース作成権限を付与
+- **README更新**
+  - リリースバージョンバッジ追加
+  - ダウンロードセクション追加（EXE直接ダウンロードリンク）
+  - SmartScreen警告についての注意書き
 
 ---
 
