@@ -250,6 +250,25 @@ PySide6 (Qt) + OpenCVで構築。
   - オレンジ色: 1〜3隅のみ設定（処理対象外）
   - 灰色: 未設定
 
+### Phase 14: Windows HEIC対応強化
+
+- **pillow-heif初期化の改善**
+  - 初期化を一度だけ行うようにキャッシュ機能追加
+  - `_heif_registered`, `_heif_available`フラグで状態管理
+  - `_init_heif_support()`関数で初期化を一元化
+- **エラーハンドリング強化**
+  - `ImportError`だけでなく全ての例外をキャッチ
+  - エラーメッセージをコンソールに出力（デバッグ用）
+- **EXIF情報の保持**
+  - HEIC→JPEG変換時にEXIF情報を維持
+- **ImageMagickフォールバック追加**
+  - pillow-heifが動作しない場合のWindows用代替手段
+  - `magick`コマンド（ImageMagick 7）を優先
+  - `convert`コマンド（ImageMagick 6）もサポート
+- **ドキュメント整備**
+  - BUILD_WINDOWS.mdにHEICトラブルシューティングガイド追加
+  - デバッグ用コンソール付きビルド方法を記載
+
 ---
 
 ## ファイル構成
