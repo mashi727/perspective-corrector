@@ -28,19 +28,47 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QMouseEvent, QBrush, QAction, QKeySequence
 
 
+# HEIC対応: pillow-heifの初期化状態を追跡
+_heif_registered = False
+_heif_available = None  # None=未確認, True=利用可能, False=利用不可
+
+
+def _init_heif_support():
+    """pillow-heifの初期化（一度だけ実行）"""
+    global _heif_registered, _heif_available
+
+    if _heif_available is not None:
+        return _heif_available
+
+    try:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+        _heif_registered = True
+        _heif_available = True
+        return True
+    except Exception as e:
+        print(f"pillow-heif initialization failed: {e}")
+        _heif_available = False
+        return False
+
+
 def convert_heic_to_temp_jpeg(heic_path: str) -> str:
     """HEICファイルを一時的なJPEGに変換"""
     # pillow-heifが使える場合はそれを使用
-    try:
-        from PIL import Image
-        import pillow_heif
-        pillow_heif.register_heif_opener()
-        img = Image.open(heic_path)
-        temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
-        img.save(temp_file.name, 'JPEG', quality=95)
-        return temp_file.name
-    except ImportError:
-        pass
+    if _init_heif_support():
+        try:
+            from PIL import Image
+            img = Image.open(heic_path)
+            # EXIF情報を保持してJPEGに変換
+            exif = img.info.get('exif', None)
+            temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+            if exif:
+                img.save(temp_file.name, 'JPEG', quality=95, exif=exif)
+            else:
+                img.save(temp_file.name, 'JPEG', quality=95)
+            return temp_file.name
+        except Exception as e:
+            print(f"HEIC conversion with pillow-heif failed: {e}")
 
     # macOSの場合はsipsコマンドを使用
     if platform.system() == 'Darwin':
@@ -53,7 +81,32 @@ def convert_heic_to_temp_jpeg(heic_path: str) -> str:
                 check=True, capture_output=True
             )
             return temp_path
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            print(f"HEIC conversion with sips failed: {e}")
+
+    # Windowsの場合: ImageMagickがあれば使用
+    if platform.system() == 'Windows':
+        temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+        temp_path = temp_file.name
+        temp_file.close()
+        try:
+            # ImageMagickのmagickコマンドを試す
+            subprocess.run(
+                ['magick', heic_path, '-quality', '95', temp_path],
+                check=True, capture_output=True
+            )
+            return temp_path
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+        try:
+            # 古いImageMagickのconvertコマンドを試す
+            subprocess.run(
+                ['convert', heic_path, '-quality', '95', temp_path],
+                check=True, capture_output=True
+            )
+            return temp_path
+        except (subprocess.CalledProcessError, FileNotFoundError):
             pass
 
     return None

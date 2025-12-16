@@ -85,3 +85,49 @@ https://learn.microsoft.com/ja-jp/cpp/windows/latest-supported-vc-redist
 ### モジュールが見つからないエラー
 
 `perspective_corrector.spec`の`hiddenimports`に不足しているモジュールを追加してください。
+
+### HEIC/HEIFファイルが表示できない
+
+HEIC対応は以下の優先順位で試行されます:
+
+1. **pillow-heif** (推奨)
+2. **ImageMagick** (フォールバック)
+
+#### pillow-heifが動作しない場合
+
+コマンドプロンプトで以下を実行して確認:
+
+```bash
+python -c "import pillow_heif; pillow_heif.register_heif_opener(); print('OK')"
+```
+
+エラーが出る場合は、pillow-heifを再インストール:
+
+```bash
+pip uninstall pillow-heif
+pip install pillow-heif --no-cache-dir
+```
+
+#### ImageMagickをフォールバックとして使用
+
+pillow-heifが動作しない場合、ImageMagickをインストールすることでHEIC対応が可能です:
+
+1. [ImageMagick公式サイト](https://imagemagick.org/script/download.php#windows)からWindows版をダウンロード
+2. インストール時に「Add application directory to your system path」にチェック
+3. HEIC対応のために「Install HEIC/HEIF」オプションにチェック
+
+インストール確認:
+
+```bash
+magick -version
+```
+
+#### デバッグ用ビルド
+
+HEIC関連のエラーを確認するには、コンソール付きでビルド:
+
+```bash
+pyinstaller --onefile --console --name PerspectiveCorrector_debug perspective_corrector.py
+```
+
+コンソールにエラーメッセージが表示されます。
