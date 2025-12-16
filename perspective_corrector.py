@@ -319,9 +319,15 @@ def perspective_transform_cv(input_path: str, corners: list, output_path: str,
         # 色調補正を適用（プロジェクター写真の色かぶり等を補正）
         result = auto_color_correction(result, color_settings)
 
+        # -------------------------------------------------------------------------
         # 出力形式に応じて保存
-        # PNG: 可逆圧縮（品質重視）、圧縮レベル3（0-9、低いほど高速）
-        # JPEG: 非可逆圧縮（ファイルサイズ重視）、品質95%
+        # PNG: 可逆圧縮（品質劣化なし）
+        #   - 圧縮レベル0-9（0=無圧縮/高速、9=最大圧縮/低速）
+        #   - レベル3は圧縮速度とファイルサイズのバランスが良い
+        #   - 圧縮レベルは画質に影響しない（PNGは常に可逆）
+        # JPEG: 非可逆圧縮（ファイルサイズ重視）
+        #   - 品質95%で視覚的にほぼ劣化なし
+        # -------------------------------------------------------------------------
         output_path_str = str(output_path)
         if output_path_str.lower().endswith('.png'):
             cv2.imwrite(output_path_str, result, [cv2.IMWRITE_PNG_COMPRESSION, 3])
@@ -2658,14 +2664,22 @@ class PerspectiveCorrectorApp(QMainWindow):
         self.center_dialog(progress, 400, 100)
 
         # -------------------------------------------------------------------------
-        # A4横サイズの定義
-        # PDFの座標単位はポイント（pt）: 1pt = 1/72インチ ≈ 0.353mm
+        # A4横サイズの定義（高品質印刷用: 300dpi）
         # A4用紙は国際規格ISO 216で 210mm × 297mm と定義されている
         # 横向き（landscape）では 297mm × 210mm になる
-        # ポイントへの変換: 297mm × (72/25.4) ≈ 841.89pt
+        #
+        # 解像度の考え方:
+        #   - 72dpi: 画面表示用（Web、プレビュー）
+        #   - 150dpi: 一般的な印刷（ニュースレター等）
+        #   - 300dpi: 高品質印刷（書籍、写真）
+        #
+        # 300dpiでのピクセル数計算:
+        #   297mm × (300/25.4) ≈ 3508 pixels
+        #   210mm × (300/25.4) ≈ 2480 pixels
         # -------------------------------------------------------------------------
-        A4_WIDTH_PT = 841.89   # 297mm（横方向）
-        A4_HEIGHT_PT = 595.28  # 210mm（縦方向）
+        PDF_DPI = 300  # 高品質印刷用解像度
+        A4_WIDTH_PX = int(297 * PDF_DPI / 25.4)   # 3508 pixels
+        A4_HEIGHT_PX = int(210 * PDF_DPI / 25.4)  # 2480 pixels
 
         corrected_images = []  # PDFに含める画像リスト
         error_files = []       # エラーが発生したファイルのリスト
@@ -2720,16 +2734,16 @@ class PerspectiveCorrectorApp(QMainWindow):
                     # 画像が用紙からはみ出ないようにする
                     # -----------------------------------------------------------------
                     img_width, img_height = img.size
-                    scale = min(A4_WIDTH_PT / img_width, A4_HEIGHT_PT / img_height)
+                    scale = min(A4_WIDTH_PX / img_width, A4_HEIGHT_PX / img_height)
                     new_width = int(img_width * scale)
                     new_height = int(img_height * scale)
 
                     # A4横サイズの白背景を作成し、リサイズした画像を中央に配置
                     # 余白は白で埋められる（印刷時に自然に見える）
-                    a4_img = Image.new('RGB', (int(A4_WIDTH_PT), int(A4_HEIGHT_PT)), 'white')
+                    a4_img = Image.new('RGB', (A4_WIDTH_PX, A4_HEIGHT_PX), 'white')
                     resized = img.resize((new_width, new_height), Image.LANCZOS)
-                    x = (int(A4_WIDTH_PT) - new_width) // 2
-                    y = (int(A4_HEIGHT_PT) - new_height) // 2
+                    x = (A4_WIDTH_PX - new_width) // 2
+                    y = (A4_HEIGHT_PX - new_height) // 2
                     a4_img.paste(resized, (x, y))
 
                     corrected_images.append(a4_img)
@@ -2750,11 +2764,17 @@ class PerspectiveCorrectorApp(QMainWindow):
 
             try:
                 # Pillowのマルチページ出力: 最初の画像に残りを追加
+                # -------------------------------------------------------------------------
+                # PDF保存時の解像度設定
+                # Pillowのresolutionパラメータは画像のDPI情報をPDFに埋め込む
+                # 300dpiを指定することで、PDF内の画像が高解像度として扱われ、
+                # 印刷時に鮮明な出力が得られる
+                # -------------------------------------------------------------------------
                 corrected_images[0].save(
                     pdf_path,
                     save_all=True,
                     append_images=corrected_images[1:] if len(corrected_images) > 1 else [],
-                    resolution=72.0  # PDF標準解像度
+                    resolution=PDF_DPI  # 高品質印刷用解像度（300dpi）
                 )
             except Exception as e:
                 error_files.append(("PDF保存", str(e)))
