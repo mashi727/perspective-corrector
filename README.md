@@ -17,6 +17,14 @@
 
 > 初回起動時はWindowsのSmartScreenが警告を表示する場合があります。「詳細情報」→「実行」で起動できます。
 
+### macOS版（インストール不要）
+
+**[PerspectiveCorrector.dmg をダウンロード](https://github.com/mashi727/perspective-corrector/releases/latest/download/PerspectiveCorrector.dmg)**
+
+DMGファイルを開き、アプリケーションをApplicationsフォルダにドラッグしてください。
+
+> 初回起動時は「開発元を確認できません」と表示される場合があります。「システム設定」→「プライバシーとセキュリティ」→「このまま開く」で起動できます。
+
 ## 機能
 
 ### 基本機能
