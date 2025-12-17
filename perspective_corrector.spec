@@ -28,9 +28,8 @@ block_cipher = None
 # pillow-heif の依存関係を収集
 pillow_heif_datas, pillow_heif_binaries, pillow_heif_hiddenimports = collect_all('pillow_heif')
 
-# 不要なモジュールを除外してサイズ削減
+# 不要なPySide6モジュールのみ除外（標準ライブラリは除外しない）
 excludes = [
-    # PySide6の不要なモジュール
     'PySide6.QtQml',
     'PySide6.QtQuick',
     'PySide6.QtQuickWidgets',
@@ -55,32 +54,17 @@ excludes = [
     'PySide6.QtSerialPort',
     'PySide6.QtSql',
     'PySide6.QtTest',
-    'PySide6.QtXml',
     'PySide6.QtDesigner',
     'PySide6.QtHelp',
-    'PySide6.QtOpenGL',
-    'PySide6.QtOpenGLWidgets',
     'PySide6.QtPdf',
     'PySide6.QtPdfWidgets',
     'PySide6.QtRemoteObjects',
     'PySide6.QtScxml',
     'PySide6.QtStateMachine',
-    'PySide6.QtSvgWidgets',
     'PySide6.QtCharts',
     'PySide6.QtDataVisualization',
     'PySide6.QtNetworkAuth',
-    # その他不要なモジュール
     'tkinter',
-    'unittest',
-    'email',
-    'html',
-    'http',
-    'xml',
-    'pydoc',
-    'doctest',
-    'argparse',
-    'difflib',
-    'inspect',
 ]
 
 a = Analysis(
