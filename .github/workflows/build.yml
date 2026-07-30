@@ -23,8 +23,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # setup-uv は v8 以降、移動するメジャータグ（v8, v9）を発行していないため、
+      # 完全なバージョン番号で指定する必要がある
       - name: Set up uv
-        uses: astral-sh/setup-uv@v9
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
@@ -57,8 +59,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # setup-uv は v8 以降、移動するメジャータグ（v8, v9）を発行していないため、
+      # 完全なバージョン番号で指定する必要がある
       - name: Set up uv
-        uses: astral-sh/setup-uv@v9
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
