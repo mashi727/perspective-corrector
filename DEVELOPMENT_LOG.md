@@ -343,6 +343,8 @@ PySide6 (Qt) + OpenCVで構築。
   - PyInstallerを`[dependency-groups]`のdevグループへ分離（配布物には含まれない）
   - `requirements.txt`を廃止し、依存定義を`pyproject.toml`へ一本化
   - GitHub Actionsを`astral-sh/setup-uv` + `uv sync --frozen` + `uv run`に変更
+  - 各アクションを最新メジャーへ更新（checkout v7 / upload-artifact v7 /
+    download-artifact v8 / setup-uv v9 / action-gh-release v3）してNode.js 20非推奨警告を解消
 - **バージョン情報の一元化**
   - `pyproject.toml`のバージョンを1.2.0 → 1.3.2へ同期
   - specファイルの`CFBundleVersion`を`pyproject.toml`から読み込むよう変更（二重管理を解消）

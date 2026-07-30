@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-07-30
 
 ### Changed
 - パッケージ管理をpip/venvからuvへ移行
@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `.python-version`でPython 3.11を固定
   - PyInstallerを`[dependency-groups]`のdevグループへ移動
   - GitHub Actionsを`astral-sh/setup-uv` + `uv sync --frozen` + `uv run`に変更
+- GitHub Actionsのアクションを最新メジャーへ更新（Node.js 20非推奨警告を解消）
+  - `actions/checkout` v4 → v7
+  - `actions/upload-artifact` v4 → v7 / `actions/download-artifact` v4 → v8
+  - `astral-sh/setup-uv` v5 → v9
+  - `softprops/action-gh-release` v1 → v3（`token`のデフォルトが`github.token`のため、冗長な`GITHUB_TOKEN`環境変数指定を削除）
 - `perspective_corrector.spec`の`CFBundleVersion`を`pyproject.toml`から自動読み込み（バージョンの二重管理を解消）
 - README.md / BUILD_WINDOWS.md の手順をuvベースに刷新
 

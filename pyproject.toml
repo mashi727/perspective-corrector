@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "perspective-corrector"
-version = "1.3.2"
+version = "1.4.0"
 description = "プレゼン写真の台形歪みを補正するデスクトップアプリケーション"
 readme = "README.md"
 license = {text = "MIT"}
