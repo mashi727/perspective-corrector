@@ -7,38 +7,48 @@
 ## 必要な環境
 
 - Windows 10/11
-- Python 3.9以上
+- [uv](https://docs.astral.sh/uv/)（Pythonは uv が自動取得するため、事前インストール不要）
+
+uvのインストール（PowerShell）:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
 
 ## 手順
 
-### 1. 必要なファイルをWindowsにコピー
+### 1. リポジトリを取得
 
-以下のファイルをWindows環境にコピーしてください:
+```bash
+git clone https://github.com/mashi727/perspective-corrector.git
+cd perspective-corrector
+```
+
+ビルドには最低限、以下のファイルが必要です:
 
 - `perspective_corrector.py`
 - `perspective_corrector.spec`
+- `pyproject.toml` / `uv.lock` / `.python-version`
+- `icon.ico`（Windows用アイコン）
 
 ### 2. 依存パッケージのインストール
 
-コマンドプロンプトまたはPowerShellで以下を実行:
-
 ```bash
-pip install pyinstaller PySide6 opencv-python numpy pillow pillow-heif
+uv sync --all-groups
 ```
+
+`uv.lock` に固定されたバージョンで、実行時依存（PySide6, OpenCV, NumPy, Pillow, pillow-heif）と
+ビルド用依存（PyInstaller）が `.venv` にインストールされます。
+CIと完全に同じ依存構成を再現したい場合は `--frozen` を付けてください。
 
 ### 3. EXEファイルのビルド
 
-#### 方法A: specファイルを使用（推奨）
-
 ```bash
-pyinstaller perspective_corrector.spec
+uv run pyinstaller perspective_corrector.spec --noconfirm
 ```
 
-#### 方法B: コマンドラインオプションで直接ビルド
-
-```bash
-pyinstaller --onefile --noconsole --name PerspectiveCorrector perspective_corrector.py
-```
+specファイルはプラットフォームを判定し、Windowsではone-fileモードの`.exe`、
+macOSではone-dirモードの`.app`バンドルを生成します。
 
 ### 4. 生成されたEXEファイルの場所
 
@@ -48,30 +58,43 @@ pyinstaller --onefile --noconsole --name PerspectiveCorrector perspective_correc
 dist/PerspectiveCorrector.exe
 ```
 
-## オプション
+## macOS版のビルド
 
-### アイコンを設定する場合
-
-1. `.ico`形式のアイコンファイルを用意
-2. 以下のコマンドでビルド:
+同一のspecファイルでビルドできます。
 
 ```bash
-pyinstaller --onefile --noconsole --icon=app.ico --name PerspectiveCorrector perspective_corrector.py
+uv sync --all-groups
+uv run pyinstaller perspective_corrector.spec --noconfirm
+# dist/PerspectiveCorrector.app が生成される
 ```
 
-または`perspective_corrector.spec`の`icon=None`を`icon='app.ico'`に変更してビルド。
+DMGを作成する場合:
+
+```bash
+mkdir -p dmg_contents && cp -r dist/PerspectiveCorrector.app dmg_contents/
+hdiutil create -volname "PerspectiveCorrector" -srcfolder dmg_contents -ov -format UDZO dist/PerspectiveCorrector.dmg
+```
+
+## アイコンについて
+
+specファイルはプラットフォームに応じて`icon.ico`（Windows）/`icon.icns`（macOS）を自動選択します。
+差し替える場合はリポジトリ直下の同名ファイルを置き換えてください（specの編集は不要）。
+
+`.app`バンドルの`CFBundleVersion`は`pyproject.toml`の`version`から自動的に読み込まれるため、
+バージョン更新は`pyproject.toml`のみを編集してください。
 
 ## 注意事項
 
 - 初回起動時は、EXEファイルの展開処理のため数秒かかることがあります
 - ウイルス対策ソフトが誤検知する場合は、除外設定を行ってください
 - ビルド時に`build/`と`dist/`ディレクトリが作成されます
+- タグ`v*`をpushすると、GitHub Actions（`.github/workflows/build.yml`）がWindows/macOS版を自動ビルドしてReleaseに添付します
 
 ## HEIC/HEIF対応について
 
 WindowsでHEIC/HEIF画像（iPhoneで撮影した写真など）を読み込むには、`pillow-heif`パッケージが必要です。
 
-- `pillow-heif`は依存パッケージに含まれているため、上記手順でインストールすれば自動的に対応されます
+- `pillow-heif`は`pyproject.toml`の依存に含まれているため、`uv sync`で自動的に導入されます
 - `perspective_corrector.spec`には`pillow-heif`の依存関係を自動収集する設定が含まれています
 - ビルド時に`collect_all('pillow_heif')`により必要なバイナリが自動的にバンドルされます
 
@@ -98,14 +121,14 @@ HEIC対応は以下の優先順位で試行されます:
 コマンドプロンプトで以下を実行して確認:
 
 ```bash
-python -c "import pillow_heif; pillow_heif.register_heif_opener(); print('OK')"
+uv run python -c "import pillow_heif; pillow_heif.register_heif_opener(); print('OK')"
 ```
 
-エラーが出る場合は、pillow-heifを再インストール:
+エラーが出る場合は、キャッシュを使わずに環境を作り直す:
 
 ```bash
-pip uninstall pillow-heif
-pip install pillow-heif --no-cache-dir
+uv cache clean pillow-heif
+uv sync --all-groups --reinstall-package pillow-heif
 ```
 
 #### ImageMagickをフォールバックとして使用
@@ -127,7 +150,7 @@ magick -version
 HEIC関連のエラーを確認するには、コンソール付きでビルド:
 
 ```bash
-pyinstaller --onefile --console --name PerspectiveCorrector_debug perspective_corrector.py
+uv run pyinstaller --onefile --console --name PerspectiveCorrector_debug perspective_corrector.py
 ```
 
 コンソールにエラーメッセージが表示されます。

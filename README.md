@@ -4,7 +4,8 @@
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![PySide6](https://img.shields.io/badge/PySide6-Qt6-green.svg)
-![OpenCV](https://img.shields.io/badge/OpenCV-4.x-red.svg)
+![OpenCV](https://img.shields.io/badge/OpenCV-4.x%20%7C%205.x-red.svg)
+![uv](https://img.shields.io/badge/managed%20by-uv-blueviolet.svg)
 [![Release](https://img.shields.io/github/v/release/mashi727/perspective-corrector)](https://github.com/mashi727/perspective-corrector/releases/latest)
 
 ## ダウンロード
@@ -45,35 +46,59 @@ https://github.com/user-attachments/assets/fc22470a-5e27-4404-bf19-a1fdc936953e
 
 ## インストール
 
-### pipでインストール（推奨）
+パッケージ管理には [uv](https://docs.astral.sh/uv/) を使用します。未導入の場合は先にインストールしてください。
 
 ```bash
-# GitHubから直接インストール
-pip install git+https://github.com/mashi727/perspective-corrector.git
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Homebrew
+brew install uv
 ```
 
-### 開発用インストール
+### ツールとしてインストール（推奨）
+
+```bash
+# GitHubから直接インストール（隔離環境に導入され、PATHにコマンドが追加される）
+uv tool install git+https://github.com/mashi727/perspective-corrector.git
+```
+
+インストールせずに一度だけ実行する場合:
+
+```bash
+uvx --from git+https://github.com/mashi727/perspective-corrector.git perspective-corrector
+```
+
+### 開発用セットアップ
 
 ```bash
 git clone https://github.com/mashi727/perspective-corrector.git
 cd perspective-corrector
-pip install -e .
+uv sync --all-groups   # .venv を作成し、uv.lock の内容で依存を固定インストール
 ```
 
-### 手動インストール
+`uv sync` は `.python-version`（3.11）に従って Python 処理系を自動取得するため、事前の Python インストールや venv の手動作成は不要です。
+
+### pipを使う場合
+
+uv を使わない場合も従来どおりインストールできます。
 
 ```bash
-pip install PySide6 opencv-python numpy pillow pillow-heif
+pip install git+https://github.com/mashi727/perspective-corrector.git
 ```
 
 ## 実行
 
 ```bash
-# pipインストール後
+# uv tool install 後
 perspective-corrector
 
-# または直接実行
-python perspective_corrector.py
+# 開発用セットアップ後（.venv を明示的に有効化せずに実行）
+uv run perspective-corrector
+uv run python perspective_corrector.py
 
 # ディレクトリを指定して起動
 perspective-corrector /path/to/image/directory
@@ -104,14 +129,16 @@ perspective-corrector /path/to/image/directory
 | 近似精度 | 輪郭近似の精度 |
 | 最小面積比率 | 検出する四角形の最小サイズ |
 
-## Windows用EXE作成
+## 実行ファイルのビルド
 
 詳細は [BUILD_WINDOWS.md](BUILD_WINDOWS.md) を参照。
 
 ```bash
-pip install pyinstaller
-pyinstaller perspective_corrector.spec
+uv sync --all-groups                                # PyInstaller は dev グループに含まれる
+uv run pyinstaller perspective_corrector.spec --noconfirm
 ```
+
+Windows では `dist/PerspectiveCorrector.exe`、macOS では `dist/PerspectiveCorrector.app` が生成されます。
 
 ## 出力
 

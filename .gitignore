@@ -14,6 +14,10 @@ venv/
 .venv/
 ENV/
 
+# uv
+# uv.lock はアプリケーションの再現性のためコミットする（無視しない）
+.uv-cache/
+
 # IDE
 .idea/
 .vscode/
@@ -25,6 +29,7 @@ ENV/
 Thumbs.db
 
 # App specific
+# 作業用の画像ファイルを誤ってコミットしないよう、画像形式は原則無視する
 perspective_config.json
 *_corrected.png
 *.heic
@@ -35,6 +40,10 @@ perspective_config.json
 *.JPG
 *.JPEG
 *.PNG
+
+# ただしアイコン素材はビルドに必要なため追跡する
+!icon.png
+!icons/*.png
 
 # Claude Code local config
 CLAUDE.md
