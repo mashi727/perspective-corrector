@@ -5,7 +5,7 @@
 プレゼンテーション写真の台形歪みを補正するデスクトップアプリケーション。
 PySide6 (Qt) + OpenCVで構築。
 
-## 現在の仕様 (2025-12-16)
+## 現在の仕様 (2026-07-30)
 
 ### 基本情報
 
@@ -15,8 +15,10 @@ PySide6 (Qt) + OpenCVで構築。
 | フレームワーク | PySide6 (Qt6) |
 | 画像処理 | OpenCV, NumPy |
 | 対応画像形式 | JPEG, PNG, HEIC/HEIF |
-| ウィンドウサイズ | 最小 1500x800 |
+| ウィンドウサイズ | 固定 1500x800（`setFixedSize`） |
 | スプリッター比率 | 350:1050 (ファイル一覧:画像表示) |
+| パッケージ管理 | uv（`pyproject.toml` + `uv.lock`） |
+| Pythonバージョン | 3.11（`.python-version`で固定、動作要件は3.9以上） |
 
 ### 機能一覧
 
@@ -107,7 +109,8 @@ PySide6 (Qt) + OpenCVで構築。
 
 - ファイル名: `perspective_config.json`
 - 保存場所: 作業ディレクトリ
-- 内容: 各画像の座標情報、出力ファイル名、自動認識設定
+- 内容: 各画像の座標情報、出力ファイル名、自動認識設定（`_detection_settings`）、色調補正設定（`_color_settings`）
+- 最近使用したフォルダ: `~/.perspective_corrector_recent.json`（最大10件）
 
 ---
 
@@ -314,6 +317,41 @@ PySide6 (Qt) + OpenCVで構築。
   - PDF出力: A4サイズ計算とフィット処理の説明
   - 遅延色調補正: 体感レスポンス向上のための設計説明
 
+### Phase 17: macOS対応・アイコン整備（v1.3.0 - v1.3.2）
+
+- **macOSビルド対応**
+  - specファイルでプラットフォーム判定（macOS: one-dir + `.app`バンドル / Windows: one-file `.exe`）
+  - GitHub Actionsを`build.yml`に統合し、Windows/macOSを同時ビルド
+  - DMG作成ステップ（`hdiutil`）を追加
+- **アプリケーションアイコン**
+  - `icon.svg`を原本とし、`icon.png` → `icon.icns`（macOS）/ `icon.ico`（Windows）を生成
+  - specファイルのアイコンパスをspec配置ディレクトリ基準に修正
+- **ウィンドウ管理**
+  - ウィンドウサイズを1500×800に固定し、OSのタイリング/最大化を無効化
+- **ビルドサイズ削減**
+  - 未使用のPySide6モジュール（QtQml, Qt3D, QtWebEngine等）を除外
+  - 除外しすぎて起動に失敗したため、必要なモジュールを再度含めるよう修正（v1.3.2）
+  - opencv-python-headlessはmacOSで問題があったためopencv-pythonへ差し戻し
+
+---
+
+### Phase 18: uvへの移行・リポジトリ整合
+
+- **パッケージ管理をuvへ移行**
+  - `uv.lock`をコミットし、CI・開発環境で同一の依存構成を再現
+  - `.python-version`（3.11）でPython処理系を固定（uvが自動取得するため事前インストール不要）
+  - PyInstallerを`[dependency-groups]`のdevグループへ分離（配布物には含まれない）
+  - `requirements.txt`を廃止し、依存定義を`pyproject.toml`へ一本化
+  - GitHub Actionsを`astral-sh/setup-uv` + `uv sync --frozen` + `uv run`に変更
+- **バージョン情報の一元化**
+  - `pyproject.toml`のバージョンを1.2.0 → 1.3.2へ同期
+  - specファイルの`CFBundleVersion`を`pyproject.toml`から読み込むよう変更（二重管理を解消）
+  - CHANGELOG.mdにv1.3.0 - v1.3.2の記録を追加
+- **ドキュメント・コードの整合**
+  - README.md / BUILD_WINDOWS.md をuvベースの手順に刷新
+  - PDF出力のdocstringの誤記（72dpi → 実装どおり300dpi）を修正
+  - `order_corners()`内の未使用コード（重心・角度ソート）を削除
+
 ---
 
 ## ファイル構成
@@ -322,13 +360,17 @@ PySide6 (Qt) + OpenCVで構築。
 perspective-corrector/
 ├── .github/
 │   └── workflows/
-│       └── build-windows.yml   # GitHub Actions設定
+│       └── build.yml           # GitHub Actions設定（Windows/macOS同時ビルド）
 ├── perspective_corrector.py    # メインアプリケーション
-├── pyproject.toml              # パッケージ設定
+├── pyproject.toml              # パッケージ設定・依存定義（バージョンの単一情報源）
+├── uv.lock                     # 依存関係のロックファイル
+├── .python-version             # 開発・CIで使用するPythonバージョン
 ├── perspective_corrector.spec  # PyInstallerビルド設定
-├── requirements.txt            # 依存パッケージ
+├── icon.svg / icon.png         # アイコン原本
+├── icon.ico / icon.icns        # プラットフォーム別アイコン
 ├── README.md                   # プロジェクト説明
-├── BUILD_WINDOWS.md            # Windowsビルド手順
+├── BUILD_WINDOWS.md            # ビルド手順（Windows/macOS）
+├── CHANGELOG.md                # 変更履歴
 ├── DEVELOPMENT_LOG.md          # 本ファイル
 └── LICENSE                     # MITライセンス
 ```
@@ -338,12 +380,18 @@ perspective-corrector/
 ## インストール・実行
 
 ```bash
-# GitHubからインストール
-pip install git+https://github.com/mashi727/perspective-corrector.git
+# GitHubからインストール（uv）
+uv tool install git+https://github.com/mashi727/perspective-corrector.git
 
 # 実行
 perspective-corrector
 
 # ディレクトリ指定
 perspective-corrector /path/to/image/directory
+
+# 開発用セットアップ
+git clone https://github.com/mashi727/perspective-corrector.git
+cd perspective-corrector
+uv sync --all-groups
+uv run perspective-corrector
 ```
