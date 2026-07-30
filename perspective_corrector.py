@@ -472,20 +472,7 @@ def order_corners(pts):
     Returns:
         [(x, y), ...] 左上、右上、右下、左下の順
     """
-    # 重心を計算（角度ソート用、現在は使用していない）
-    center = pts.mean(axis=0)
-
-    # 角度でソート（デバッグ用に残している）
-    angles = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
-    sorted_indices = np.argsort(angles)
-    sorted_pts = pts[sorted_indices]
-
-    # 最も左上の点を見つける（x+yが最小）
-    sums = sorted_pts.sum(axis=1)
-    top_left_idx = np.argmin(sums)
-    ordered = np.roll(sorted_pts, -top_left_idx, axis=0)
-
-    # 実際の並び替えはx+y、x-yの性質を使う
+    # x+y（左上・右下の判定用）と x-y（右上・左下の判定用）の性質を使って並び替える
     rect = np.zeros((4, 2), dtype=np.float32)
     s = pts.sum(axis=1)
     diff = np.diff(pts, axis=1).flatten()
@@ -2639,7 +2626,7 @@ class PerspectiveCorrectorApp(QMainWindow):
             - 用紙サイズ: A4横（297mm × 210mm）
             - 画像配置: アスペクト比を維持して最大サイズで中央配置
             - 背景: 白
-            - 解像度: 72dpi（PDF標準）
+            - 解像度: 300dpi（高品質印刷用、3508 × 2480 pixels）
 
         処理フロー:
             1. 各画像に台形補正＋色調補正を適用（一時ファイルに保存）
