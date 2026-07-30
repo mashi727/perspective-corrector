@@ -23,6 +23,31 @@ if app_icon and not os.path.exists(app_icon):
 else:
     print(f"Using icon: {app_icon}")
 
+
+# =============================================================================
+# バージョン番号の取得
+# =============================================================================
+# バージョンの単一情報源は pyproject.toml。
+# ここで二重管理すると .app バンドルの CFBundleVersion がズレるため、
+# ビルド時に pyproject.toml から読み出す。
+# tomllib は Python 3.11 以降の標準ライブラリ（3.10 以前は tomli にフォールバック）。
+def _read_version() -> str:
+    pyproject_path = os.path.join(SPEC_DIR, 'pyproject.toml')
+    try:
+        try:
+            import tomllib
+        except ModuleNotFoundError:
+            import tomli as tomllib
+        with open(pyproject_path, 'rb') as f:
+            return tomllib.load(f)['project']['version']
+    except Exception as e:
+        print(f"WARNING: Failed to read version from pyproject.toml: {e}")
+        return '0.0.0'
+
+
+APP_VERSION = _read_version()
+print(f"Building version: {APP_VERSION}")
+
 block_cipher = None
 
 # pillow-heif の依存関係を収集
@@ -138,8 +163,8 @@ if sys.platform == 'darwin':
         info_plist={
             'CFBundleName': 'PerspectiveCorrector',
             'CFBundleDisplayName': 'Perspective Corrector',
-            'CFBundleVersion': '1.1.0',
-            'CFBundleShortVersionString': '1.1.0',
+            'CFBundleVersion': APP_VERSION,
+            'CFBundleShortVersionString': APP_VERSION,
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,
         },
