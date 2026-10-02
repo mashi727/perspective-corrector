@@ -8,6 +8,14 @@
 ![uv](https://img.shields.io/badge/managed%20by-uv-blueviolet.svg)
 [![Release](https://img.shields.io/github/v/release/mashi727/perspective-corrector)](https://github.com/mashi727/perspective-corrector/releases/latest)
 
+## 考え方
+
+何が問題で、それをどう解いているかを PAD（問題分析図）で示します。各段の詳細は下の各節を参照してください。
+
+<img src="docs/pad/concept.png" alt="考え方の PAD。斜めに撮った投影を正面から見た画像にするため、画像ごとに 4 隅を自動検出または人が指定して詰め、一括処理で射影変換して PNG か PDF に書き出す" width="100%">
+
+<sub>図の元は [`docs/pad/concept.spd`](docs/pad/concept.spd)。[padkit](https://github.com/mashi727/padkit) で検査・描画しています。</sub>
+
 ## ダウンロード
 
 ### Windows版（インストール不要）
