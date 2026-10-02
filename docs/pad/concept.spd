@@ -1,5 +1,5 @@
 斜めに撮った投影を、@正面から見た画像にする
-	:comment 問題：斜めから撮ると台形に歪む
+	:comment 課題：斜めから撮ると台形に歪む
 	:comment 方針：4 隅を決めて射影変換する
 	画像のフォルダを開く
 		$ perspective-corrector <dir>
